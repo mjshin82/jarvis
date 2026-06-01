@@ -22,7 +22,12 @@ BARGE_IN_MIN_MS = 300          # 재생 중엔 이만큼 '연속' 발화해야 b
 MOONSHINE_MODEL = "moonshine/base"   # or "moonshine/tiny" (더 빠름)
 
 # --- LLM (DeepSeek V4) ---
-DEEPSEEK_API_KEY = os.environ["DEEPSEEK_API_KEY"]
+# 비용 절감을 위한 mock 모드. true 면 실제 API 를 호출하지 않고 고정 메시지를 응답한다.
+LLM_MOCK = os.getenv("LLM_MOCK", "true").lower() in ("1", "true", "yes")
+MOCK_MESSAGE = "AI를 통한 응답은 현재 mock처리됩니다."
+
+# mock 모드에선 키가 없어도 동작하도록 getenv 사용 (실제 호출 시에만 필요)
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 

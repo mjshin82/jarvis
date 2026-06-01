@@ -3,6 +3,9 @@
 토큰을 스트리밍으로 받아 문장 종결부호가 보이면 즉시 yield 한다.
 → LLM 이 답을 끝내기 전에 첫 문장부터 TTS로 흘려보낼 수 있다(체감 지연 ↓).
 대화 맥락은 self.history 에 누적한다(알렉사식 멀티턴).
+
+config.LLM_MOCK 가 true 면 실제 API 를 호출하지 않고 고정 메시지(MOCK_MESSAGE)로
+응답한다 — 개발 중 비용 발생을 막기 위한 모드.
 """
 import re
 
@@ -16,15 +19,28 @@ _SENTENCE_END = re.compile(r"[.!?。…？！]\s*$|[\n]")
 
 class LLM:
     def __init__(self):
-        self.client = AsyncOpenAI(
-            api_key=config.DEEPSEEK_API_KEY,
-            base_url=config.DEEPSEEK_BASE_URL,
+        self.mock = config.LLM_MOCK
+        # mock 모드에선 실제 API 클라이언트를 만들지 않는다(키 불필요·비용 0).
+        self.client = (
+            None if self.mock
+            else AsyncOpenAI(
+                api_key=config.DEEPSEEK_API_KEY,
+                base_url=config.DEEPSEEK_BASE_URL,
+            )
         )
         self.history = [{"role": "system", "content": config.SYSTEM_PROMPT}]
+        if self.mock:
+            print(f"[llm] ⚠️  MOCK 모드: '{config.MOCK_MESSAGE}' 로만 응답합니다.")
 
     async def respond(self, user_text: str):
         """async generator: 완성된 문장을 하나씩 yield."""
         self.history.append({"role": "user", "content": user_text})
+
+        # --- MOCK 모드: 실제 API 호출 없이 항상 고정 메시지 응답 ---
+        if self.mock:
+            self.history.append({"role": "assistant", "content": config.MOCK_MESSAGE})
+            yield config.MOCK_MESSAGE
+            return
 
         full, buf = "", ""
         try:
