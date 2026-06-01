@@ -33,6 +33,7 @@ async def main():
     player = Player()
     wake = WakeWord()
 
+    await llm.warmup()                              # 모델 예열 → 첫 응답 지연 제거
     player_task = asyncio.create_task(player.run())
     state = "WAITING_WAKE"
     response: asyncio.Task | None = None   # 진행 중 응답 흐름

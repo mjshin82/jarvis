@@ -49,6 +49,7 @@ DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 # local: Ollama. 서버 실행 `ollama serve`, 모델 준비 `ollama pull gemma4:e4b`
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
 LOCAL_MODEL = os.getenv("LOCAL_MODEL", "gemma4:e4b")
+OLLAMA_KEEP_ALIVE = os.getenv("OLLAMA_KEEP_ALIVE", "30m")  # 모델을 메모리에 유지(콜드로드 방지). -1=무한
 
 # 웹 검색 (Serper.dev = 구글 결과). 키 있으면 LLM 이 web_search 도구를 쓸 수 있다.
 SERPER_API_KEY = os.getenv("SERPER_API_KEY", "")

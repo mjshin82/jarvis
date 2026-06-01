@@ -77,6 +77,9 @@ class LLM:
         else:
             raise ValueError(f"알 수 없는 LLM_BACKEND: {self.backend!r} (mock|remote|local)")
 
+        # local: 모델을 메모리에 유지(콜드 로드 방지). 매 호출에 keep_alive 전달.
+        self.extra = {"keep_alive": config.OLLAMA_KEEP_ALIVE} if self.backend == "local" else {}
+
         # 사용 가능한 도구 구성 (클라이언트 있을 때만)
         self.tools = []
         sys_prompt = config.SYSTEM_PROMPT + f"\n오늘 날짜는 {datetime.now():%Y년 %m월 %d일}이다."
@@ -104,12 +107,27 @@ class LLM:
             return await play_music(args.get("query", ""))
         return "지원하지 않는 도구입니다."
 
+    async def warmup(self):
+        """시작 시 모델을 메모리에 미리 적재 → 첫 실제 응답 지연 제거."""
+        if self.client is None:
+            return
+        try:
+            await self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": "안녕"}],
+                max_tokens=1,
+                extra_body=self.extra,
+            )
+            print("[llm] 모델 예열 완료")
+        except Exception as e:
+            print(f"[llm] 예열 생략: {e}")
+
     async def _stream_answer(self, messages):
         """messages 로 스트리밍 호출하며 문장 단위 yield. 끝나면 history 에 assistant 기록."""
         full, buf = "", ""
         try:
             stream = await self.client.chat.completions.create(
-                model=self.model, messages=messages, stream=True,
+                model=self.model, messages=messages, stream=True, extra_body=self.extra,
             )
             async for chunk in stream:
                 delta = chunk.choices[0].delta.content or ""
@@ -144,7 +162,7 @@ class LLM:
 
         # 1차: 도구 호출 감지 (비스트리밍)
         first = await self.client.chat.completions.create(
-            model=self.model, messages=self.history, tools=self.tools,
+            model=self.model, messages=self.history, tools=self.tools, extra_body=self.extra,
         )
         msg = first.choices[0].message
 
