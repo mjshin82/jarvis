@@ -15,7 +15,8 @@ from moonshine_onnx import MoonshineOnnxModel
 
 import config
 
-_MIN_SAMPLES = 1600  # 0.1s @ 16kHz — 그보다 짧으면 무의미
+_MIN_SAMPLES = 1600    # 0.1s @ 16kHz — 그보다 짧으면 무의미
+_MIN_RMS = 0.01        # 이보다 조용하면 무음으로 보고 STT 생략 (모델 환각 방지)
 
 
 class STT:
@@ -49,6 +50,9 @@ class STT:
     def _transcribe_sync(self, audio: np.ndarray) -> str:
         audio = np.ascontiguousarray(audio.squeeze(), dtype=np.float32)
         if audio.size < _MIN_SAMPLES:
+            return ""
+        # 무음/저음량은 모델이 환각(반복 토큰)을 내므로 STT 자체를 생략
+        if float(np.sqrt(np.mean(audio ** 2))) < _MIN_RMS:
             return ""
         tokens = self.model.generate(audio[None, :])     # [[id, id, ...]]
         out = self.tokenizer.decode_batch(tokens)
