@@ -19,6 +19,7 @@ from music import play_music
 
 # 문장 끝으로 볼 부호 (한국어/영어).
 _SENTENCE_END = re.compile(r"[.!?。…？！]\s*$|[\n]")
+_WEEKDAYS = ["월", "화", "수", "목", "금", "토", "일"]
 
 _TOOL_WEB_SEARCH = {
     "type": "function",
@@ -82,19 +83,30 @@ class LLM:
 
         # 사용 가능한 도구 구성 (클라이언트 있을 때만)
         self.tools = []
-        sys_prompt = config.SYSTEM_PROMPT + f"\n오늘 날짜는 {datetime.now():%Y년 %m월 %d일}이다."
+        base = config.SYSTEM_PROMPT
         if self.client is not None:
             if config.SEARCH_ENABLED:
                 self.tools.append(_TOOL_WEB_SEARCH)
-                sys_prompt += "\n최신·실시간 정보가 필요하면 web_search 도구로 검색해 답한다."
+                base += "\n최신·실시간 정보가 필요하면 web_search 도구로 검색해 답한다."
             if config.MUSIC_ENABLED:
                 self.tools.append(_TOOL_PLAY_MUSIC)
-                sys_prompt += "\n음악/영상 재생 요청은 play_music 도구를 사용한다."
+                base += "\n음악/영상 재생 요청은 play_music 도구를 사용한다."
         self.use_tools = bool(self.tools)
         if self.use_tools:
             names = ", ".join(t["function"]["name"] for t in self.tools)
             print(f"[llm] 도구 활성화: {names}")
-        self.history = [{"role": "system", "content": sys_prompt}]
+        # 날짜·시간은 매 응답마다 갱신(_refresh_now)하므로 base 만 보관
+        self.base_system = base
+        self.history = [{"role": "system", "content": base}]
+
+    def _refresh_now(self):
+        """현재 날짜·시간을 시스템 메시지에 반영(매 턴 갱신). 날짜/시간 질문 대응."""
+        now = datetime.now()
+        self.history[0]["content"] = (
+            self.base_system
+            + f"\n지금은 {now:%Y년 %m월 %d일} {_WEEKDAYS[now.weekday()]}요일 "
+              f"{now:%H시 %M분}이다. 날짜·시간 질문은 검색하지 말고 이 정보로 답한다."
+        )
 
     async def _run_tool(self, name, args_json):
         try:
@@ -153,6 +165,8 @@ class LLM:
             self.history.append({"role": "assistant", "content": config.MOCK_MESSAGE})
             yield config.MOCK_MESSAGE
             return
+
+        self._refresh_now()   # 현재 날짜·시간을 시스템 프롬프트에 반영
 
         # 도구 비활성 → 곧바로 스트리밍
         if not self.use_tools:
