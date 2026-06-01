@@ -61,7 +61,18 @@ class Microphone:
 
                 # 호출어는 항상 감지 (VAD 와 독립)
                 if wake_detect is not None and wake_detect(block):
+                    # 호출어 직전까지의 캡처·VAD·큐 잔여(= 'Hey Jarvis' 음성)를 완전히 폐기
+                    # → 호출어가 명령 캡처로 새어들어가는 것을 방지
+                    collecting = False
+                    buffer = []
+                    self._vad.reset_states()
+                    while not self._blocks.empty():
+                        try:
+                            self._blocks.get_nowait()
+                        except queue.Empty:
+                            break
                     yield ("wake", None)
+                    continue
 
                 # 자비스가 소리내는 중에는 VAD 무시 (효과음/응답 되먹임 차단)
                 if is_speaking():
