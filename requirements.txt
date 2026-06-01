@@ -1,0 +1,20 @@
+# --- Core ---
+openai>=1.40.0          # DeepSeek V4 (OpenAI 호환 API)
+python-dotenv>=1.0.0    # .env 로드
+
+# --- Audio I/O ---
+sounddevice>=0.4.6      # 마이크 캡처 + 스피커 재생
+numpy>=1.24.0
+
+# --- VAD (발화 끝 감지) ---
+silero-vad>=5.1         # torch 기반 VAD
+# torch 는 silero-vad 의존성으로 함께 설치됨 (Apple Silicon: pip 가 알아서 mps 빌드 설치)
+
+# --- STT (로컬) ---
+useful-moonshine-onnx   # Moonshine ONNX 추론
+# 설치: pip install useful-moonshine-onnx@git+https://github.com/usefulsensors/moonshine.git#subdirectory=moonshine-onnx
+onnxruntime>=1.17.0
+
+# --- TTS (로컬) ---
+supertonic>=1.3.1       # Supertonic 온디바이스 TTS (ONNX). 모델은 첫 실행시 HF 자동 다운로드
+soundfile>=0.12.1
