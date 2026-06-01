@@ -80,7 +80,9 @@ async def main():
 
     idle()
     try:
-        async for kind, audio in mic.events(wake_detect=wake.detect):
+        async for kind, audio in mic.events(
+            wake_detect=wake.detect, is_speaking=player.is_speaking
+        ):
             if kind == "wake":
                 # 어느 상태에서든: 진행 중 응답 중단 → wake.wav → 듣기 시작
                 await cancel(response); response = None

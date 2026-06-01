@@ -31,7 +31,7 @@ class Microphone:
             print(f"[audio] {status}")
         self._blocks.put(indata[:, 0].copy())
 
-    async def events(self, wake_detect=None):
+    async def events(self, wake_detect=None, is_speaking=lambda: False):
         """async generator: 마이크에서 이벤트를 yield.
 
           ("wake", None)         호출어('Hey Jarvis') 감지 (항상 동작)
@@ -39,8 +39,10 @@ class Microphone:
           ("utterance", audio)   발화가 끝남 → STT/LLM 처리 대상
 
         wake_detect(block)->bool: 블록마다 호출되는 호출어 감지 콜백(없으면 생략).
-        호출어는 어느 상태에서도 항상 감지되며, VAD 와 독립적으로 동작한다.
-        에코 루프 차단·상태 전환은 상위(main 상태머신)가 이벤트로 판단한다.
+          호출어는 어느 상태에서도 항상 감지된다(VAD 와 독립).
+        is_speaking()->bool: 자비스가 소리내는 중(효과음/응답 재생)인지.
+          True 인 동안엔 VAD 입력을 무시한다 → 삑소리(wake/ok)·TTS 가 마이크로
+          되먹임되어 발화로 잡히는 것을 방지. (호출어 감지는 그대로 유지)
         """
         loop = asyncio.get_running_loop()
         stream = sd.InputStream(
@@ -60,6 +62,14 @@ class Microphone:
                 # 호출어는 항상 감지 (VAD 와 독립)
                 if wake_detect is not None and wake_detect(block):
                     yield ("wake", None)
+
+                # 자비스가 소리내는 중에는 VAD 무시 (효과음/응답 되먹임 차단)
+                if is_speaking():
+                    if collecting:
+                        collecting = False
+                        buffer = []
+                    self._vad.reset_states()
+                    continue
 
                 event = self._vad(block)  # {'start':...} / {'end':...} / None
                 if event and "start" in event:
