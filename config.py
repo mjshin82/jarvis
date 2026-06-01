@@ -50,6 +50,11 @@ DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
 LOCAL_MODEL = os.getenv("LOCAL_MODEL", "gemma4:e4b")
 
+# 웹 검색 (Serper.dev = 구글 결과). 키 있으면 LLM 이 web_search 도구를 쓸 수 있다.
+SERPER_API_KEY = os.getenv("SERPER_API_KEY", "")
+SEARCH_ENABLED = bool(SERPER_API_KEY)
+SEARCH_FILLER = "잠시만요, 검색해볼게요."   # 검색하는 동안 먼저 읽어줄 멘트
+
 SYSTEM_PROMPT = (
     "너는 'Jarvis'라는 음성 비서다. 사용자의 말을 듣고 간결하고 자연스럽게 "
     "대답한다. 답변은 소리내어 읽힐 것이므로 짧은 문장으로, 마크다운 기호 없이 말한다."
