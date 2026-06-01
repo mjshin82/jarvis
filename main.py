@@ -51,8 +51,18 @@ async def main():
             except asyncio.CancelledError:
                 pass
 
+    async def enter_listening(cue=True):
+        """듣기 상태로 진입: (선택) wake.wav 큐 → LISTENING → 무발화 타임아웃 감시."""
+        nonlocal state, watchdog
+        await cancel(watchdog)
+        if cue:
+            await player.enqueue_file(config.FX_WAKE)
+        state = "LISTENING"
+        print("🔔 듣고 있어요…")
+        watchdog = asyncio.create_task(listen_timeout())
+
     async def respond_flow(audio):
-        """입력 완료 → ok.wav → STT → LLM → TTS 재생 → 대기 복귀."""
+        """입력 완료 → ok.wav → STT → LLM → TTS 재생 → (연속대화면) 다시 듣기."""
         await player.enqueue_file(config.FX_OK)
         text = await stt.transcribe(audio)
         if text:
@@ -67,7 +77,11 @@ async def main():
             print("🧑 (인식된 음성 없음)")
         while player.is_speaking():     # 재생이 끝날 때까지 대기
             await asyncio.sleep(0.1)
-        idle()
+        # 답변 완료 → 호출어 없이 바로 다시 듣기 (연속 대화). 끄려면 FOLLOW_UP=false
+        if config.FOLLOW_UP:
+            await enter_listening(cue=True)
+        else:
+            idle()
 
     async def listen_timeout():
         try:
@@ -86,12 +100,8 @@ async def main():
             if kind == "wake":
                 # 어느 상태에서든: 진행 중 응답 중단 → wake.wav → 듣기 시작
                 await cancel(response); response = None
-                await cancel(watchdog)
                 player.flush()
-                await player.enqueue_file(config.FX_WAKE)
-                state = "LISTENING"
-                print("🔔 듣고 있어요…")
-                watchdog = asyncio.create_task(listen_timeout())
+                await enter_listening(cue=True)
 
             elif kind == "utterance":
                 # LISTENING 상태의 발화만 처리. (그 외 상태의 발화·에코는 무시)

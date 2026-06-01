@@ -55,6 +55,8 @@ python main.py
 | `WHISPER_MODEL`     | `base` | STT 모델. 견고함↑ `small`, 품질↑ `large-v3-turbo` |
 | `WHISPER_COMPUTE`   | `int8` | CPU 연산 정밀도 |
 | `WHISPER_LANG`      | `ko` | STT 언어 고정 |
+| `FOLLOW_UP`         | `true` | 답변 후 호출어 없이 바로 다시 듣기(연속 대화) |
+| `LISTEN_TIMEOUT_S`  | `8.0` | 듣기 상태에서 무발화 시 호출어 대기로 복귀 |
 | `SUPERTONIC_VOICE`  | `F1` | 음성 (M1~M5 / F1~F5) |
 | `SUPERTONIC_LANG`   | `ko` | 합성 언어 |
 | `SUPERTONIC_STEPS`  | `8`  | ↓ 줄이면 더 빠름(품질↓) |
