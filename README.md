@@ -41,17 +41,32 @@ python main.py
 
 | 변수 | 기본값 | 설명 |
 |------|--------|------|
-| `DEEPSEEK_MODEL`    | `deepseek-v4-flash` | LLM 모델 ID |
+| `LLM_BACKEND`       | `mock` | `mock`(고정 메시지·비용0) / `remote`(DeepSeek) / `local`(Ollama) |
+| `DEEPSEEK_MODEL`    | `deepseek-v4-flash` | remote 모델 ID |
+| `OLLAMA_BASE_URL`   | `http://localhost:11434/v1` | local Ollama 엔드포인트 |
+| `LOCAL_MODEL`       | `gemma4:e4b` | local 모델 (Ollama 태그) |
 | `SUPERTONIC_VOICE`  | `F1` | 음성 (M1~M5 / F1~F5) |
 | `SUPERTONIC_LANG`   | `ko` | 합성 언어 |
 | `SUPERTONIC_STEPS`  | `8`  | ↓ 줄이면 더 빠름(품질↓) |
 | `SUPERTONIC_SPEED`  | `1.05` | 말 속도 |
 
-## 이 골격이 일부러 빼놓은 것 (다음 단계)
+### LLM 백엔드별 실행
 
-- **Barge-in (말 끊기)**: 지금은 발화→응답을 순차 처리. AI 가 말하는 중
-  사용자가 끼어들면 멈추는 기능은 없음. 필요해지면 재생 중 마이크 모니터링 +
-  `sd.stop()` + 재생 큐 비우기로 구현하거나 `pipecat` 으로 이전.
-- **Wake word**: 항상 듣는 구조. "자비스" 호출어가 필요하면 `openWakeWord` 추가.
+```bash
+# mock (기본) — 항상 "AI를 통한 응답은 현재 mock처리됩니다."
+LLM_BACKEND=mock python main.py
+
+# local — Ollama 로컬 모델 (먼저: ollama serve / ollama pull gemma4:e4b)
+LLM_BACKEND=local python main.py
+
+# remote — DeepSeek API (.env 에 DEEPSEEK_API_KEY 필요)
+LLM_BACKEND=remote python main.py
+```
+
+## 구현된 것 / 남은 것
+
+- ✅ **Barge-in (말 끊기)**: AI 가 말하는 중 사용자가 말을 시작하면 즉시 중단.
+  에코 완화(재생 중 VAD 임계값 상향 + 최소 지속시간 게이트) 포함.
+- ⬜ **Wake word**: 항상 듣는 구조. "자비스" 호출어가 필요하면 `openWakeWord` 추가.
 - **합성↔재생 더 깊은 파이프라이닝**: 현재도 N 재생 중 N+1 합성이 겹치지만,
   문장 내부 청크 스트리밍까지 하려면 TTS 출력 스트리밍 필요.
