@@ -1,11 +1,18 @@
-"""Jarvis — 로컬 음성 비서 파이프라인 오케스트레이터 (barge-in 지원).
+"""Jarvis — 호출어 기반 로컬 음성 비서 오케스트레이터.
 
-    마이크 → VAD → Moonshine STT → DeepSeek V4 (스트리밍) → Supertonic TTS → 스피커
+상태머신:
+  WAITING_WAKE  'Hey Jarvis' 대기 (다른 소리·에코는 모두 무시)
+       │ 호출 감지 → wake.wav
+       ▼
+  LISTENING     사용자 발화 캡처(VAD). 무발화 LISTEN_TIMEOUT_S 초 → 대기 복귀
+       │ 발화 끝 → ok.wav
+       ▼
+  RESPONDING    STT → LLM(스트리밍) → TTS 재생
+       │ 재생 중 'Hey Jarvis' → 재생 중단 + wake.wav → LISTENING
+       │ 재생 완료 → WAITING_WAKE
 
-핵심 1: LLM 이 문장을 하나 뱉을 때마다 즉시 TTS→재생 큐로 흘려보내,
-        LLM 이 답을 다 끝내기 전에 첫 문장부터 말하기 시작한다.
-핵심 2: 응답을 별도 태스크로 돌려, 말하는 중에도 마이크를 계속 듣는다.
-        사용자가 말을 시작하면(VAD 'start') 진행 중 응답을 즉시 끊는다(barge-in).
+이 구조 자체가 에코 루프를 막는다: RESPONDING 중 마이크로 들어온 에코는
+utterance 가 돼도 무시되고, 오직 진짜 호출어만 상태를 전환한다.
 """
 import asyncio
 
@@ -15,24 +22,7 @@ from stt import STT
 from llm import LLM
 from tts import TTS
 from player import Player
-
-
-async def handle_utterance(audio, stt, llm, tts, player):
-    """발화 하나를 받아 텍스트화 → 응답 생성 → 문장별 합성/재생.
-
-    barge-in 시 이 태스크가 통째로 cancel 된다 (LLM 스트림·TTS·enqueue 중단).
-    """
-    user_text = await stt.transcribe(audio)
-    if not user_text:
-        return
-    print(f"\n🧑 {user_text}")
-
-    print("🤖 ", end="", flush=True)
-    async for sentence in llm.respond(user_text):
-        print(sentence, end=" ", flush=True)
-        wav, sr = await tts.synth(sentence)   # 문장 합성
-        await player.enqueue(wav, sr)         # 순서대로 재생 큐에
-    print()
+from wake import WakeWord
 
 
 async def main():
@@ -41,37 +31,76 @@ async def main():
     llm = LLM()
     tts = TTS()
     player = Player()
+    wake = WakeWord()
 
-    player_task = asyncio.create_task(player.run())  # 재생 소비자 상시 가동
-    response: asyncio.Task | None = None             # 진행 중인 응답 태스크
+    player_task = asyncio.create_task(player.run())
+    state = "WAITING_WAKE"
+    response: asyncio.Task | None = None   # 진행 중 응답 흐름
+    watchdog: asyncio.Task | None = None   # LISTENING 타임아웃
 
-    async def interrupt():
-        """진행 중 응답을 끊는다: 태스크 취소 + 재생 중단 + 큐 비우기."""
-        nonlocal response
-        if response and not response.done():
-            response.cancel()
+    def idle():
+        nonlocal state
+        state = "WAITING_WAKE"
+        print("\n🎙️  'Hey Jarvis' 라고 부르세요.")
+
+    async def cancel(task):
+        if task and not task.done():
+            task.cancel()
             try:
-                await response          # finally(대화기록 정리)까지 마무리 대기
+                await task
             except asyncio.CancelledError:
                 pass
-            print("  ⏹️  (중단됨)")
-        player.flush()
 
-    print("🎙️  Jarvis 준비 완료. 말씀하세요. (Ctrl+C 로 종료)")
+    async def respond_flow(audio):
+        """입력 완료 → ok.wav → STT → LLM → TTS 재생 → 대기 복귀."""
+        await player.enqueue_file(config.FX_OK)
+        text = await stt.transcribe(audio)
+        if text:
+            print(f"🧑 {text}")
+            print("🤖 ", end="", flush=True)
+            async for sentence in llm.respond(text):
+                print(sentence, end=" ", flush=True)
+                wav, sr = await tts.synth(sentence)
+                await player.enqueue(wav, sr)
+            print()
+        else:
+            print("🧑 (인식된 음성 없음)")
+        while player.is_speaking():     # 재생이 끝날 때까지 대기
+            await asyncio.sleep(0.1)
+        idle()
+
+    async def listen_timeout():
+        try:
+            await asyncio.sleep(config.LISTEN_TIMEOUT_S)
+        except asyncio.CancelledError:
+            return
+        if state == "LISTENING":
+            print("\n⌛ 입력이 없어 대기 상태로 돌아갑니다.")
+            idle()
+
+    idle()
     try:
-        async for kind, audio in mic.events(
-            is_speaking=player.is_speaking, half_duplex=config.HALF_DUPLEX
-        ):
-            if kind == "start":
-                # 사용자가 말을 시작 → 자비스가 말하는 중이면 즉시 멈춤
-                await interrupt()
+        async for kind, audio in mic.events(wake_detect=wake.detect):
+            if kind == "wake":
+                # 어느 상태에서든: 진행 중 응답 중단 → wake.wav → 듣기 시작
+                await cancel(response); response = None
+                await cancel(watchdog)
+                player.flush()
+                await player.enqueue_file(config.FX_WAKE)
+                state = "LISTENING"
+                print("🔔 듣고 있어요…")
+                watchdog = asyncio.create_task(listen_timeout())
+
             elif kind == "utterance":
-                # 발화 완료 → 응답을 별도 태스크로 시작 (그동안 마이크 계속 청취)
-                response = asyncio.create_task(
-                    handle_utterance(audio, stt, llm, tts, player)
-                )
+                # LISTENING 상태의 발화만 처리. (그 외 상태의 발화·에코는 무시)
+                if state == "LISTENING":
+                    await cancel(watchdog); watchdog = None
+                    state = "RESPONDING"
+                    response = asyncio.create_task(respond_flow(audio))
+            # "start" 이벤트는 이 디자인에서 사용하지 않음
     finally:
-        await interrupt()
+        await cancel(response)
+        await cancel(watchdog)
         player_task.cancel()
 
 

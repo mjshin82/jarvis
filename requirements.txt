@@ -10,6 +10,9 @@ numpy>=1.24.0
 silero-vad>=5.1         # torch 기반 VAD
 # torch 는 silero-vad 의존성으로 함께 설치됨 (Apple Silicon: pip 가 알아서 mps 빌드 설치)
 
+# --- Wake word (호출어 'Hey Jarvis') ---
+openwakeword>=0.6.0     # 사전학습 hey_jarvis 모델, ONNX 추론. 모델은 첫 실행시 자동 다운로드
+
 # --- STT (로컬) ---
 useful-moonshine-onnx   # Moonshine ONNX 추론
 # 설치: pip install useful-moonshine-onnx@git+https://github.com/usefulsensors/moonshine.git#subdirectory=moonshine-onnx

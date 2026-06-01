@@ -31,19 +31,16 @@ class Microphone:
             print(f"[audio] {status}")
         self._blocks.put(indata[:, 0].copy())
 
-    async def events(self, is_speaking=lambda: False, half_duplex=True):
-        """async generator: VAD 이벤트를 yield.
+    async def events(self, wake_detect=None):
+        """async generator: 마이크에서 이벤트를 yield.
 
-          ("start", None)        사용자가 말을 시작함  → barge-in 트리거
-          ("utterance", audio)   발화가 끝남          → STT/LLM 처리 대상
+          ("wake", None)         호출어('Hey Jarvis') 감지 (항상 동작)
+          ("start", None)        VAD 가 발화 시작을 감지
+          ("utterance", audio)   발화가 끝남 → STT/LLM 처리 대상
 
-        is_speaking(): 자비스가 현재 말하는 중인지 알려주는 콜백.
-        half_duplex:
-          True(기본, 스피커 사용):  자비스가 말하는 동안 마이크 입력을 통째로 무시한다.
-              → 스피커 소리가 마이크로 되먹임되어 STT→LLM 으로 무한 호출되는
-                에코 루프를 원천 차단. 대신 재생 중 barge-in 은 불가.
-                (wake word 층을 얹으면 호출어로 끼어들 수 있다 — 다음 단계)
-          False(헤드폰 사용): 에코 경로가 없으므로 재생 중에도 즉시 barge-in 허용.
+        wake_detect(block)->bool: 블록마다 호출되는 호출어 감지 콜백(없으면 생략).
+        호출어는 어느 상태에서도 항상 감지되며, VAD 와 독립적으로 동작한다.
+        에코 루프 차단·상태 전환은 상위(main 상태머신)가 이벤트로 판단한다.
         """
         loop = asyncio.get_running_loop()
         stream = sd.InputStream(
@@ -60,20 +57,15 @@ class Microphone:
                 # 블로킹 큐를 executor 로 비동기 대기 (이벤트 루프 안 막음)
                 block = await loop.run_in_executor(None, self._blocks.get)
 
-                # --- 반이중: 자비스가 말하는 동안엔 마이크 무시 (에코 루프 차단) ---
-                if half_duplex and is_speaking():
-                    if collecting:                 # 진행 중이던 수집은 폐기
-                        collecting = False
-                        buffer = []
-                    self._vad.reset_states()        # VAD 상태 리셋 → 재생 끝나면 새로 시작
-                    continue
+                # 호출어는 항상 감지 (VAD 와 독립)
+                if wake_detect is not None and wake_detect(block):
+                    yield ("wake", None)
 
                 event = self._vad(block)  # {'start':...} / {'end':...} / None
-
                 if event and "start" in event:
                     collecting = True
                     buffer = []
-                    yield ("start", None)           # open 모드에선 즉시 barge-in 트리거
+                    yield ("start", None)
                 if collecting:
                     buffer.append(block)
                 if event and "end" in event and collecting:

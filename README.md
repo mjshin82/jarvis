@@ -1,22 +1,29 @@
 # Jarvis — 로컬 음성 비서 (최소 프로토타입)
 
 ```
-마이크 → VAD(silero) → STT(Moonshine, 로컬) → LLM(DeepSeek V4 API) → TTS(Supertonic, 로컬) → 스피커
+'Hey Jarvis' → wake.wav → [발화 캡처] → ok.wav → STT → LLM(스트리밍) → TTS → 스피커
+   (호출어 대기)                (VAD)                                       │
+        ▲────────────────────  재생 완료 / 재생 중 'Hey Jarvis' 로 끼어들기 ─┘
 ```
 
-온라인 의존은 **LLM 한 곳뿐**. STT·TTS 는 Mac 로컬(ONNX) 실행.
+- 호출어 **'Hey Jarvis'** 로 깨우는 구조 (openWakeWord, 로컬)
+- STT(Moonshine)·TTS(Supertonic)·Wake(openWakeWord) 모두 **Mac 로컬(ONNX)**
+- LLM 은 `mock`/`remote`(DeepSeek)/`local`(Ollama) 중 선택
+- 호출어 상태머신이 **스피커 에코 되먹임 루프도 차단**(응답 중 에코는 무시, 진짜 호출어만 전환)
 
 ## 파일 구조
 
 | 파일 | 역할 |
 |------|------|
-| `config.py`   | 샘플레이트·모델명·API 키 등 전역 설정 |
-| `audio_io.py` | 마이크 캡처 + VAD 로 발화 단위 잘라내기 |
+| `config.py`   | 오디오 포맷·모델·백엔드·호출어 등 전역 설정 |
+| `audio_io.py` | 마이크 캡처 + VAD(발화) + 호출어 감지 훅 |
+| `wake.py`     | openWakeWord 'Hey Jarvis' 감지 (로컬) |
 | `stt.py`      | Moonshine 추론 (→ 텍스트) |
-| `llm.py`      | DeepSeek 스트리밍 + **문장 단위 청킹** |
-| `tts.py`      | Supertonic 추론 (→ 오디오, 로컬) ✅ 연결됨 |
-| `player.py`   | 순서 보장 재생 (합성과 재생 분리) |
-| `main.py`     | asyncio 오케스트레이터 |
+| `llm.py`      | LLM 백엔드(mock/remote/local) + **문장 단위 청킹** |
+| `tts.py`      | Supertonic 추론 (→ 오디오, 로컬) |
+| `player.py`   | 순서 보장 재생 + 효과음(`enqueue_file`) + barge-in `flush` |
+| `main.py`     | 호출어 상태머신 오케스트레이터 |
+| `scripts/make_fx.py` | 효과음(`sound/fx/wake.wav`, `ok.wav`) 생성 |
 
 ## 설치
 
@@ -65,8 +72,11 @@ LLM_BACKEND=remote python main.py
 
 ## 구현된 것 / 남은 것
 
-- ✅ **Barge-in (말 끊기)**: AI 가 말하는 중 사용자가 말을 시작하면 즉시 중단.
-  에코 완화(재생 중 VAD 임계값 상향 + 최소 지속시간 게이트) 포함.
-- ⬜ **Wake word**: 항상 듣는 구조. "자비스" 호출어가 필요하면 `openWakeWord` 추가.
+- ✅ **Wake word ('Hey Jarvis')**: 호출어로 깨우는 구조. 호출 전 음성은 무시.
+- ✅ **Barge-in**: 응답 재생 중 'Hey Jarvis' 로 끊고 다시 듣기.
+- ✅ **에코 루프 차단**: 호출어 상태머신으로 스피커 되먹임 무한호출 방지.
+- ✅ **효과음**: 호출 인식(`wake.wav`) / 입력 완료(`ok.wav`). `scripts/make_fx.py` 로 생성, 교체 가능.
+- ⬜ **한국어 호출어 '자비스'**: 현재 호출어는 영어 "Hey Jarvis"(사전학습). 한국어는 커스텀 학습 필요.
+- ⬜ **LISTENING 타임아웃 튜닝, 멀티 호출어** 등.
 - **합성↔재생 더 깊은 파이프라이닝**: 현재도 N 재생 중 N+1 합성이 겹치지만,
   문장 내부 청크 스트리밍까지 하려면 TTS 출력 스트리밍 필요.

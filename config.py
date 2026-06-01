@@ -13,11 +13,17 @@ BLOCK_SIZE = 512          # silero-vad 권장 프레임 크기(16kHz에서 32ms)
 VAD_THRESHOLD = 0.5       # 평상시 음성 확률 임계값
 SILENCE_MS = 700          # 이만큼 조용하면 "발화 끝"으로 간주
 
-# --- 에코 대책 ---
-# True(스피커 사용): 자비스가 말하는 동안 마이크 입력을 무시(반이중) → 에코 루프 차단.
-#                    대신 재생 중 barge-in 불가 (호출어 층을 얹으면 끼어들기 가능).
-# False(헤드폰 사용): 에코 경로가 없으므로 재생 중에도 즉시 barge-in 허용.
-HALF_DUPLEX = os.getenv("HALF_DUPLEX", "true").lower() in ("1", "true", "yes")
+# --- Wake word ('Hey Jarvis') ---
+# 호출어 대기 → 호출 시에만 입력을 받는 구조. 상태머신이 에코 루프도 함께 막는다
+# (응답 재생 중 들어온 에코는 무시되고, 오직 진짜 호출어만 상태를 전환).
+WAKE_MODEL = "hey_jarvis"                                   # openWakeWord 사전학습 모델
+WAKE_THRESHOLD = float(os.getenv("WAKE_THRESHOLD", "0.5"))  # 감지 임계값(0~1)
+WAKE_COOLDOWN_S = float(os.getenv("WAKE_COOLDOWN_S", "2.0"))   # 연속 오발동 방지
+LISTEN_TIMEOUT_S = float(os.getenv("LISTEN_TIMEOUT_S", "8.0"))  # 호출 후 무발화 시 대기 복귀
+
+# 효과음 (없으면 무시). scripts/make_fx.py 로 기본 톤 생성 가능
+FX_WAKE = "sound/fx/wake.wav"   # 호출 인식 → "듣고 있어요"
+FX_OK = "sound/fx/ok.wav"       # 입력 완료 → "접수"
 
 # --- STT ---
 MOONSHINE_MODEL = "moonshine/base"   # or "moonshine/tiny" (더 빠름)

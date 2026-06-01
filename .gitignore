@@ -13,7 +13,10 @@ venv/
 
 # 모델/오디오 산출물
 models/
+# test 출력 등은 제외하되, 효과음(sound/fx)은 커밋
 *.wav
+!sound/fx/
+!sound/fx/*.wav
 
 # OS
 .DS_Store

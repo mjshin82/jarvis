@@ -8,19 +8,21 @@ N 문장을 재생 → 파이프라인이 끊기지 않는다.
 barge-in: flush() 가 현재 재생을 즉시 끊고(sd.stop) 대기 중인 큐를 비운다.
 """
 import asyncio
+import os
 
 import numpy as np
 import sounddevice as sd
+import soundfile as sf
 
 
 class Player:
     def __init__(self):
         self.queue: asyncio.Queue = asyncio.Queue()
         self._playing = False   # 지금 한 청크를 실제로 재생 중인지
+        self._fx_cache: dict[str, tuple] = {}   # 효과음 wav 캐시
 
     def is_speaking(self) -> bool:
-        """자비스가 말하는 중인가? (재생 중이거나 재생 대기 큐가 남았으면 True)
-        에코 완화 게이트가 이 신호로 VAD 민감도를 조절한다."""
+        """자비스가 말하는 중인가? (재생 중이거나 재생 대기 큐가 남았으면 True)"""
         return self._playing or not self.queue.empty()
 
     def _play_sync(self, audio: np.ndarray, sr: int):
@@ -40,6 +42,20 @@ class Player:
 
     async def enqueue(self, audio: np.ndarray, sr: int):
         await self.queue.put((audio, sr))
+
+    async def enqueue_file(self, path: str):
+        """효과음 wav 를 재생 큐에 넣는다. 파일이 없으면 조용히 무시."""
+        if path not in self._fx_cache:
+            if not os.path.exists(path):
+                self._fx_cache[path] = None
+            else:
+                audio, sr = sf.read(path, dtype="float32")
+                if audio.ndim > 1:                 # 스테레오 → 모노
+                    audio = audio.mean(axis=1)
+                self._fx_cache[path] = (np.ascontiguousarray(audio), sr)
+        item = self._fx_cache[path]
+        if item is not None:
+            await self.enqueue(*item)
 
     def flush(self):
         """barge-in: 대기 큐를 비우고 현재 재생을 중단한다."""
