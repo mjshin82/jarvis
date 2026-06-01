@@ -78,8 +78,11 @@ async def main():
             print("🧑 (인식된 음성 없음)")
         while player.is_speaking():     # 재생이 끝날 때까지 대기
             await asyncio.sleep(0.1)
-        # 답변 완료 → 호출어 없이 바로 다시 듣기 (연속 대화). 끄려면 FOLLOW_UP=false
-        if config.FOLLOW_UP:
+        # 음악을 틀었으면 → 호출어 대기로(음악 소리가 마이크로 들어와 오인되는 것 방지).
+        # 그 외에는 연속 대화(FOLLOW_UP) 시 바로 다시 듣기.
+        if "play_music" in llm.last_tool_names:
+            idle()
+        elif config.FOLLOW_UP:
             await enter_listening(cue=True)
         else:
             idle()

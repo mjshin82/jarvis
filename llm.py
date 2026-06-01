@@ -109,6 +109,7 @@ class LLM:
         # 날짜·시간은 매 응답마다 갱신(_refresh_now)하므로 base 만 보관
         self.base_system = base
         self.history = [{"role": "system", "content": base}]
+        self.last_tool_names = []   # 직전 respond() 에서 호출된 도구 이름들
 
     def _refresh_now(self):
         """현재 날짜·시간을 시스템 메시지에 반영(매 턴 갱신). 날짜/시간 질문 대응."""
@@ -173,6 +174,7 @@ class LLM:
     async def respond(self, user_text: str):
         """async generator: 완성된 문장을 하나씩 yield."""
         self.history.append({"role": "user", "content": user_text})
+        self.last_tool_names = []
 
         if self.backend == "mock":
             self.history.append({"role": "assistant", "content": config.MOCK_MESSAGE})
@@ -213,6 +215,7 @@ class LLM:
         })
         # 도구 종류에 맞는 멘트를 먼저 읽어 침묵을 메움
         names = [tc.function.name for tc in msg.tool_calls]
+        self.last_tool_names = names
         if "play_music" in names:
             yield config.MUSIC_FILLER
         elif "stop_music" in names:
