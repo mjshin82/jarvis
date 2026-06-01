@@ -9,6 +9,7 @@
 """
 import asyncio
 
+import config
 from audio_io import Microphone
 from stt import STT
 from llm import LLM
@@ -58,7 +59,9 @@ async def main():
 
     print("🎙️  Jarvis 준비 완료. 말씀하세요. (Ctrl+C 로 종료)")
     try:
-        async for kind, audio in mic.events(is_speaking=player.is_speaking):
+        async for kind, audio in mic.events(
+            is_speaking=player.is_speaking, half_duplex=config.HALF_DUPLEX
+        ):
             if kind == "start":
                 # 사용자가 말을 시작 → 자비스가 말하는 중이면 즉시 멈춤
                 await interrupt()

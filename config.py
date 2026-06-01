@@ -13,10 +13,11 @@ BLOCK_SIZE = 512          # silero-vad 권장 프레임 크기(16kHz에서 32ms)
 VAD_THRESHOLD = 0.5       # 평상시 음성 확률 임계값
 SILENCE_MS = 700          # 이만큼 조용하면 "발화 끝"으로 간주
 
-# --- 에코 완화 (barge-in 오작동 방지) ---
-# 자비스가 말하는 동안엔 스피커 소리(에코)가 마이크로 새어들 수 있다.
-VAD_THRESHOLD_SPEAKING = 0.85  # 재생 중엔 임계값을 높여 약한 에코를 무시
-BARGE_IN_MIN_MS = 300          # 재생 중엔 이만큼 '연속' 발화해야 barge-in 인정(짧은 에코 blip 무시)
+# --- 에코 대책 ---
+# True(스피커 사용): 자비스가 말하는 동안 마이크 입력을 무시(반이중) → 에코 루프 차단.
+#                    대신 재생 중 barge-in 불가 (호출어 층을 얹으면 끼어들기 가능).
+# False(헤드폰 사용): 에코 경로가 없으므로 재생 중에도 즉시 barge-in 허용.
+HALF_DUPLEX = os.getenv("HALF_DUPLEX", "true").lower() in ("1", "true", "yes")
 
 # --- STT ---
 MOONSHINE_MODEL = "moonshine/base"   # or "moonshine/tiny" (더 빠름)

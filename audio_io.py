@@ -31,21 +31,21 @@ class Microphone:
             print(f"[audio] {status}")
         self._blocks.put(indata[:, 0].copy())
 
-    async def events(self, is_speaking=lambda: False):
-        """async generator: VAD 이벤트를 yield. 에코 완화 게이트 포함.
+    async def events(self, is_speaking=lambda: False, half_duplex=True):
+        """async generator: VAD 이벤트를 yield.
 
           ("start", None)        사용자가 말을 시작함  → barge-in 트리거
           ("utterance", audio)   발화가 끝남          → STT/LLM 처리 대상
 
         is_speaking(): 자비스가 현재 말하는 중인지 알려주는 콜백.
-          - 재생 중이면 VAD 임계값을 높여(VAD_THRESHOLD_SPEAKING) 약한 에코를 무시
-          - 재생 중엔 발화가 BARGE_IN_MIN_MS 이상 지속될 때만 'start' 를 알림.
-            지속시간 미달 구간은 에코로 보고 'utterance' 로도 내보내지 않는다.
+        half_duplex:
+          True(기본, 스피커 사용):  자비스가 말하는 동안 마이크 입력을 통째로 무시한다.
+              → 스피커 소리가 마이크로 되먹임되어 STT→LLM 으로 무한 호출되는
+                에코 루프를 원천 차단. 대신 재생 중 barge-in 은 불가.
+                (wake word 층을 얹으면 호출어로 끼어들 수 있다 — 다음 단계)
+          False(헤드폰 사용): 에코 경로가 없으므로 재생 중에도 즉시 barge-in 허용.
         """
         loop = asyncio.get_running_loop()
-        ms_per_block = config.BLOCK_SIZE / config.SAMPLE_RATE * 1000
-        min_blocks = max(1, round(config.BARGE_IN_MIN_MS / ms_per_block))
-
         stream = sd.InputStream(
             samplerate=config.SAMPLE_RATE,
             channels=config.CHANNELS,
@@ -55,32 +55,28 @@ class Microphone:
         )
         with stream:
             collecting = False
-            announced = False            # 이번 발화의 'start' 를 이미 알렸는지
             buffer: list[np.ndarray] = []
             while True:
                 # 블로킹 큐를 executor 로 비동기 대기 (이벤트 루프 안 막음)
                 block = await loop.run_in_executor(None, self._blocks.get)
 
-                # 재생 중이면 더 엄격한 임계값 적용 (에코 억제)
-                speaking = is_speaking()
-                self._vad.threshold = (
-                    config.VAD_THRESHOLD_SPEAKING if speaking else config.VAD_THRESHOLD
-                )
+                # --- 반이중: 자비스가 말하는 동안엔 마이크 무시 (에코 루프 차단) ---
+                if half_duplex and is_speaking():
+                    if collecting:                 # 진행 중이던 수집은 폐기
+                        collecting = False
+                        buffer = []
+                    self._vad.reset_states()        # VAD 상태 리셋 → 재생 끝나면 새로 시작
+                    continue
+
                 event = self._vad(block)  # {'start':...} / {'end':...} / None
 
                 if event and "start" in event:
                     collecting = True
-                    announced = False
                     buffer = []
+                    yield ("start", None)           # open 모드에선 즉시 barge-in 트리거
                 if collecting:
                     buffer.append(block)
-                    # barge-in 알림 게이트: 재생 중이면 최소 지속시간 충족 후에만 알림
-                    if not announced and (not speaking or len(buffer) >= min_blocks):
-                        announced = True
-                        yield ("start", None)
                 if event and "end" in event and collecting:
                     collecting = False
                     self._vad.reset_states()
-                    # announced 된 발화만 처리. (재생 중 짧은 에코 blip 은 버림)
-                    if announced:
-                        yield ("utterance", np.concatenate(buffer))
+                    yield ("utterance", np.concatenate(buffer))
