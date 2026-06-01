@@ -7,7 +7,7 @@
 ```
 
 - 호출어 **'Hey Jarvis'** 로 깨우는 구조 (openWakeWord, 로컬)
-- STT(Moonshine)·TTS(Supertonic)·Wake(openWakeWord) 모두 **Mac 로컬(ONNX)**
+- STT(faster-whisper)·TTS(Supertonic)·Wake(openWakeWord) 모두 **Mac 로컬**
 - LLM 은 `mock`/`remote`(DeepSeek)/`local`(Ollama) 중 선택
 - 호출어 상태머신이 **스피커 에코 되먹임 루프도 차단**(응답 중 에코는 무시, 진짜 호출어만 전환)
 
@@ -18,7 +18,7 @@
 | `config.py`   | 오디오 포맷·모델·백엔드·호출어 등 전역 설정 |
 | `audio_io.py` | 마이크 캡처 + VAD(발화) + 호출어 감지 훅 |
 | `wake.py`     | openWakeWord 'Hey Jarvis' 감지 (로컬) |
-| `stt.py`      | Moonshine **한국어** 추론 (base-ko, → 텍스트) |
+| `stt.py`      | faster-whisper 추론 (large-v3-turbo, 한국어, → 텍스트) |
 | `llm.py`      | LLM 백엔드(mock/remote/local) + **문장 단위 청킹** |
 | `tts.py`      | Supertonic 추론 (→ 오디오, 로컬) |
 | `player.py`   | 순서 보장 재생 + 효과음(`enqueue_file`) + barge-in `flush` |
@@ -52,6 +52,9 @@ python main.py
 | `DEEPSEEK_MODEL`    | `deepseek-v4-flash` | remote 모델 ID |
 | `OLLAMA_BASE_URL`   | `http://localhost:11434/v1` | local Ollama 엔드포인트 |
 | `LOCAL_MODEL`       | `gemma4:e4b` | local 모델 (Ollama 태그) |
+| `WHISPER_MODEL`     | `large-v3-turbo` | STT 모델. 더 빠르게: `small`/`medium`(품질↓) |
+| `WHISPER_COMPUTE`   | `int8` | CPU 연산 정밀도 |
+| `WHISPER_LANG`      | `ko` | STT 언어 고정 |
 | `SUPERTONIC_VOICE`  | `F1` | 음성 (M1~M5 / F1~F5) |
 | `SUPERTONIC_LANG`   | `ko` | 합성 언어 |
 | `SUPERTONIC_STEPS`  | `8`  | ↓ 줄이면 더 빠름(품질↓) |

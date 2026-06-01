@@ -25,10 +25,12 @@ LISTEN_TIMEOUT_S = float(os.getenv("LISTEN_TIMEOUT_S", "8.0"))  # 호출 후 무
 FX_WAKE = "sound/fx/wake.wav"   # 호출 인식 → "듣고 있어요"
 FX_OK = "sound/fx/ok.wav"       # 입력 완료 → "접수"
 
-# --- STT (Moonshine 한국어 모델, 로컬 ONNX) ---
-# 한국어 전용 base 모델 + 자체 토크나이저. (영어 호출어는 openWakeWord 가 별도 담당)
-MOONSHINE_REPO = os.getenv("MOONSHINE_REPO", "onnx-community/moonshine-base-ko-ONNX")
-MOONSHINE_ARCH = "base"   # base-ko 는 base 아키텍처(레이어 수 결정용)
+# --- STT (faster-whisper, 로컬) ---
+# 다국어 고품질. (영어 호출어는 openWakeWord 가 별도 담당)
+WHISPER_MODEL = os.getenv("WHISPER_MODEL", "large-v3-turbo")
+WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cpu")     # CTranslate2: Apple Silicon 은 CPU
+WHISPER_COMPUTE = os.getenv("WHISPER_COMPUTE", "int8")  # int8: 빠르고 가벼움
+WHISPER_LANG = os.getenv("WHISPER_LANG", "ko")          # 명령 언어(한국어 고정 → 환각↓)
 
 # --- LLM 백엔드 선택: mock | remote | local ---
 #   mock   : 실제 호출 없이 고정 메시지 응답 (비용 0, 기본값)
