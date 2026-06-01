@@ -104,13 +104,17 @@ async def main():
                 player.flush()
                 await enter_listening(cue=True)
 
+            elif kind == "start":
+                # 사용자가 말을 시작 → 타임아웃 취소 (긴 발화 중 대기 복귀 방지)
+                if state == "LISTENING":
+                    await cancel(watchdog); watchdog = None
+
             elif kind == "utterance":
                 # LISTENING 상태의 발화만 처리. (그 외 상태의 발화·에코는 무시)
                 if state == "LISTENING":
                     await cancel(watchdog); watchdog = None
                     state = "RESPONDING"
                     response = asyncio.create_task(respond_flow(audio))
-            # "start" 이벤트는 이 디자인에서 사용하지 않음
     finally:
         await cancel(response)
         await cancel(watchdog)
