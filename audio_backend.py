@@ -7,6 +7,7 @@ import shutil
 
 import numpy as np
 
+import audio_proto as proto
 import config
 
 
@@ -130,17 +131,115 @@ async def _chrome_stop_music() -> str:
 
 
 class AECBackend(AudioBackend):
-    """Swift 데몬 클라이언트 — 실제 구현은 이후 태스크. 지금은 생성만 가능."""
-    async def start(self): raise NotImplementedError
-    async def close(self): ...
+    """Swift 데몬 클라이언트 — audio_proto 프레이밍으로 stdin/stdout 통신."""
+
+    def __init__(self, cmd=None):
+        self._cmd = cmd
+        self._proc = None
+        self._reader_task = None
+        self._mic_q: asyncio.Queue = None
+        self._dec = proto.FrameDecoder()
+        self._voice_active = 0
+        self._music = None
+
+    @property
+    def supports_inapp_audio(self):
+        return True
+
+    def _resolve_cmd(self):
+        if self._cmd:
+            return self._cmd
+        import os
+        import subprocess
+        bin_path = config.AUDIOD_PATH
+        need_build = (not os.path.exists(bin_path) or
+                      os.path.getmtime(config.AUDIOD_SRC) > os.path.getmtime(bin_path))
+        if need_build:
+            subprocess.run(["swiftc", config.AUDIOD_SRC, "-o", bin_path,
+                            "-framework", "AVFoundation"], check=True)
+        return [bin_path]
+
+    async def start(self):
+        self._mic_q = asyncio.Queue()
+        cmd = self._resolve_cmd()
+        self._proc = await asyncio.create_subprocess_exec(
+            *cmd, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+        )
+        self._reader_task = asyncio.create_task(self._read_loop())
+
+    async def _read_loop(self):
+        while True:
+            chunk = await self._proc.stdout.read(4096)
+            if not chunk:
+                break
+            self._dec.feed(chunk)
+            for mtype, payload in self._dec:
+                if mtype == proto.MIC:
+                    await self._mic_q.put(proto.pcm_to_array(payload).copy())
+                elif mtype == proto.EVENT:
+                    ev = proto.decode_event(payload)
+                    if ev.get("voice") == "drained":
+                        self._voice_active = 0
+
+    async def close(self):
+        if self._music:
+            await self.stop_music()
+        if self._reader_task:
+            self._reader_task.cancel()
+        if self._proc and self._proc.returncode is None:
+            self._proc.terminate()
+
     async def mic_frames(self):
-        if False:
-            yield
-    async def play_voice(self, pcm, sr): raise NotImplementedError
-    def flush_voice(self): ...
-    def is_speaking(self): return False
-    async def play_music(self, query): raise NotImplementedError
-    async def stop_music(self): raise NotImplementedError
+        while True:
+            yield await self._mic_q.get()
+
+    async def _send(self, data: bytes):
+        self._proc.stdin.write(data)
+        await self._proc.stdin.drain()
+
+    async def play_voice(self, pcm, sr):
+        pcm48 = _resample_mono(pcm, sr, 48000)
+        self._voice_active += 1
+        await self._send(proto.encode_pcm(proto.PLAY_VOICE, pcm48))
+
+    def flush_voice(self):
+        self._voice_active = 0
+        self._proc.stdin.write(proto.encode(proto.FLUSH_VOICE))
+
+    def is_speaking(self):
+        return self._voice_active > 0
+
+    async def play_music(self, query):
+        from music import resolve_track, start_ffmpeg_pump
+        await self.stop_music()
+        track = await resolve_track(query)
+        if not track:
+            return f"'{query}' 에 맞는 음악을 찾지 못했습니다."
+        vid, title = track
+        self._music = await start_ffmpeg_pump(vid, self._send_music)
+        return f"재생 시작: {title}"
+
+    async def _send_music(self, pcm48):
+        await self._send(proto.encode_pcm(proto.PLAY_MUSIC, pcm48))
+
+    async def stop_music(self):
+        if self._proc and self._proc.stdin:
+            self._proc.stdin.write(proto.encode(proto.STOP_MUSIC))
+        if self._music:
+            from music import stop_ffmpeg_pump
+            await stop_ffmpeg_pump(self._music)
+            self._music = None
+            return "음악을 껐습니다."
+        return "재생 중인 음악이 없습니다."
+
+
+def _resample_mono(pcm, sr, target):
+    pcm = np.ascontiguousarray(pcm, dtype=np.float32).reshape(-1)
+    if sr == target:
+        return pcm
+    import librosa
+    return np.ascontiguousarray(librosa.resample(pcm, orig_sr=sr, target_sr=target),
+                                dtype=np.float32)
 
 
 def _aec_available() -> bool:
