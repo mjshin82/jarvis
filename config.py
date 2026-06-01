@@ -17,7 +17,7 @@ SILENCE_MS = 700          # 이만큼 조용하면 "발화 끝"으로 간주
 # 호출어 대기 → 호출 시에만 입력을 받는 구조. 상태머신이 에코 루프도 함께 막는다
 # (응답 재생 중 들어온 에코는 무시되고, 오직 진짜 호출어만 상태를 전환).
 WAKE_MODEL = "hey_jarvis"                                   # openWakeWord 사전학습 모델
-WAKE_THRESHOLD = float(os.getenv("WAKE_THRESHOLD", "0.5"))  # 감지 임계값(0~1)
+WAKE_THRESHOLD = float(os.getenv("WAKE_THRESHOLD", "0.4"))  # 감지 임계값(0~1). 낮을수록 민감(잘 깨어남)
 WAKE_COOLDOWN_S = float(os.getenv("WAKE_COOLDOWN_S", "2.0"))   # 연속 오발동 방지
 LISTEN_TIMEOUT_S = float(os.getenv("LISTEN_TIMEOUT_S", "8.0"))  # 호출 후 무발화 시 대기 복귀
 # True: 답변 후 호출어 없이 바로 다시 듣기(연속 대화). 무발화 LISTEN_TIMEOUT_S초 → 호출어 대기 복귀
