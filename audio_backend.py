@@ -1,7 +1,9 @@
 """오디오 입출력 추상화. 구현: SounddeviceBackend(폴백), AECBackend(Swift 데몬)."""
 import abc
 import asyncio
+import platform
 import queue
+import shutil
 
 import numpy as np
 
@@ -125,3 +127,37 @@ async def _chrome_play_music(query: str) -> str:
 async def _chrome_stop_music() -> str:
     from music import chrome_stop
     return await chrome_stop()
+
+
+class AECBackend(AudioBackend):
+    """Swift 데몬 클라이언트 — 실제 구현은 이후 태스크. 지금은 생성만 가능."""
+    async def start(self): raise NotImplementedError
+    async def close(self): ...
+    async def mic_frames(self):
+        if False:
+            yield
+    async def play_voice(self, pcm, sr): raise NotImplementedError
+    def flush_voice(self): ...
+    def is_speaking(self): return False
+    async def play_music(self, query): raise NotImplementedError
+    async def stop_music(self): raise NotImplementedError
+
+
+def _aec_available() -> bool:
+    """macOS + swiftc(빌드용) 또는 xcrun 존재."""
+    return bool(shutil.which("swiftc")) or shutil.which("xcrun") is not None
+
+
+def make_backend() -> AudioBackend:
+    mode = config.AEC
+    if mode == "off":
+        return SounddeviceBackend()
+    is_mac = platform.system() == "Darwin"
+    if mode == "on":
+        if not is_mac:
+            raise RuntimeError("AEC=on 이지만 macOS 가 아닙니다.")
+        return AECBackend()
+    # auto
+    if is_mac and _aec_available():
+        return AECBackend()
+    return SounddeviceBackend()
