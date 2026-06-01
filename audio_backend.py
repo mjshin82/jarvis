@@ -205,8 +205,16 @@ class AECBackend(AudioBackend):
             self._proc.terminate()
 
     async def mic_frames(self):
+        # 데몬은 변환 후 가변 크기 블록을 보내므로, VAD 가 요구하는 정확히
+        # BLOCK_SIZE(512) 샘플 블록으로 재청크해서 내보낸다.
+        buf = np.empty(0, dtype=np.float32)
+        bs = config.BLOCK_SIZE
         while True:
-            yield await self._mic_q.get()
+            frame = await self._mic_q.get()
+            buf = np.concatenate([buf, frame])
+            while len(buf) >= bs:
+                yield np.ascontiguousarray(buf[:bs])
+                buf = buf[bs:]
 
     async def _send(self, data: bytes):
         self._proc.stdin.write(data)
