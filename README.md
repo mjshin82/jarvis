@@ -52,7 +52,7 @@ python main.py
 | `DEEPSEEK_MODEL`    | `deepseek-v4-flash` | remote 모델 ID |
 | `OLLAMA_BASE_URL`   | `http://localhost:11434/v1` | local Ollama 엔드포인트 |
 | `LOCAL_MODEL`       | `gemma4:e4b` | local 모델 (Ollama 태그) |
-| `WHISPER_MODEL`     | `base` | STT 모델. 견고함↑ `small`, 품질↑ `large-v3-turbo` |
+| `WHISPER_MODEL`     | `small` | STT 모델. 더 빠르게 `base`, 품질↑ `large-v3-turbo` |
 | `WHISPER_COMPUTE`   | `int8` | CPU 연산 정밀도 |
 | `WHISPER_LANG`      | `ko` | STT 언어 고정 |
 | `FOLLOW_UP`         | `true` | 답변 후 호출어 없이 바로 다시 듣기(연속 대화) |

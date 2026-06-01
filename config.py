@@ -29,7 +29,7 @@ FX_OK = "sound/fx/ok.wav"       # 입력 완료 → "접수"
 
 # --- STT (faster-whisper, 로컬) ---
 # 다국어 고품질. (영어 호출어는 openWakeWord 가 별도 담당)
-WHISPER_MODEL = os.getenv("WHISPER_MODEL", "base")     # 속도 우선. 견고함은 small, 품질은 large-v3-turbo
+WHISPER_MODEL = os.getenv("WHISPER_MODEL", "small")    # 실사용 견고함. 더 빠르게 base, 품질 large-v3-turbo
 WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cpu")     # CTranslate2: Apple Silicon 은 CPU
 WHISPER_COMPUTE = os.getenv("WHISPER_COMPUTE", "int8")  # int8: 빠르고 가벼움
 WHISPER_LANG = os.getenv("WHISPER_LANG", "ko")          # 명령 언어(한국어 고정 → 환각↓)
