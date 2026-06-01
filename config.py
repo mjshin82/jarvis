@@ -55,6 +55,11 @@ SERPER_API_KEY = os.getenv("SERPER_API_KEY", "")
 SEARCH_ENABLED = bool(SERPER_API_KEY)
 SEARCH_FILLER = "잠시만요, 검색해볼게요."   # 검색하는 동안 먼저 읽어줄 멘트
 
+# 음악 재생 (yt-dlp 로 유튜브 검색 → 브라우저 재생)
+MUSIC_ENABLED = os.getenv("MUSIC_ENABLED", "true").lower() in ("1", "true", "yes")
+MUSIC_FILLER = "네, 틀어드릴게요."           # 재생 준비 동안 먼저 읽어줄 멘트
+BROWSER_APP = os.getenv("BROWSER_APP", "Google Chrome")   # macOS 앱 이름
+
 SYSTEM_PROMPT = (
     "너는 'Jarvis'라는 음성 비서다. 사용자의 말을 듣고 간결하고 자연스럽게 "
     "대답한다. 답변은 소리내어 읽힐 것이므로 짧은 문장으로, 마크다운 기호 없이 말한다."

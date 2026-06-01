@@ -15,11 +15,12 @@ from openai import AsyncOpenAI
 
 import config
 from search import web_search
+from music import play_music
 
 # 문장 끝으로 볼 부호 (한국어/영어).
 _SENTENCE_END = re.compile(r"[.!?。…？！]\s*$|[\n]")
 
-TOOLS = [{
+_TOOL_WEB_SEARCH = {
     "type": "function",
     "function": {
         "name": "web_search",
@@ -31,7 +32,21 @@ TOOLS = [{
             "required": ["query"],
         },
     },
-}]
+}
+
+_TOOL_PLAY_MUSIC = {
+    "type": "function",
+    "function": {
+        "name": "play_music",
+        "description": "유튜브에서 노래/음악/영상을 찾아 브라우저로 재생한다. "
+                       "사용자가 '○○ 틀어줘/들려줘/재생해줘' 처럼 음악·영상 재생을 요청할 때 사용.",
+        "parameters": {
+            "type": "object",
+            "properties": {"query": {"type": "string", "description": "곡/아티스트/영상 검색어"}},
+            "required": ["query"],
+        },
+    },
+}
 
 
 def _split_sentences(text: str):
@@ -62,13 +77,32 @@ class LLM:
         else:
             raise ValueError(f"알 수 없는 LLM_BACKEND: {self.backend!r} (mock|remote|local)")
 
-        self.search = config.SEARCH_ENABLED and self.client is not None
-        # 현재 날짜 주입 + 검색 가능 여부 안내
+        # 사용 가능한 도구 구성 (클라이언트 있을 때만)
+        self.tools = []
         sys_prompt = config.SYSTEM_PROMPT + f"\n오늘 날짜는 {datetime.now():%Y년 %m월 %d일}이다."
-        if self.search:
-            sys_prompt += "\n최신·실시간 정보가 필요하면 web_search 도구로 검색해 답한다."
-            print("[llm] 웹 검색 도구 활성화 (Serper/구글)")
+        if self.client is not None:
+            if config.SEARCH_ENABLED:
+                self.tools.append(_TOOL_WEB_SEARCH)
+                sys_prompt += "\n최신·실시간 정보가 필요하면 web_search 도구로 검색해 답한다."
+            if config.MUSIC_ENABLED:
+                self.tools.append(_TOOL_PLAY_MUSIC)
+                sys_prompt += "\n음악/영상 재생 요청은 play_music 도구를 사용한다."
+        self.use_tools = bool(self.tools)
+        if self.use_tools:
+            names = ", ".join(t["function"]["name"] for t in self.tools)
+            print(f"[llm] 도구 활성화: {names}")
         self.history = [{"role": "system", "content": sys_prompt}]
+
+    async def _run_tool(self, name, args_json):
+        try:
+            args = json.loads(args_json) if args_json else {}
+        except Exception:
+            args = {}
+        if name == "web_search":
+            return await web_search(args.get("query", ""))
+        if name == "play_music":
+            return await play_music(args.get("query", ""))
+        return "지원하지 않는 도구입니다."
 
     async def _stream_answer(self, messages):
         """messages 로 스트리밍 호출하며 문장 단위 yield. 끝나면 history 에 assistant 기록."""
@@ -102,15 +136,15 @@ class LLM:
             yield config.MOCK_MESSAGE
             return
 
-        # 검색 비활성 → 곧바로 스트리밍
-        if not self.search:
+        # 도구 비활성 → 곧바로 스트리밍
+        if not self.use_tools:
             async for s in self._stream_answer(self.history):
                 yield s
             return
 
         # 1차: 도구 호출 감지 (비스트리밍)
         first = await self.client.chat.completions.create(
-            model=self.model, messages=self.history, tools=TOOLS,
+            model=self.model, messages=self.history, tools=self.tools,
         )
         msg = first.choices[0].message
 
@@ -122,7 +156,7 @@ class LLM:
                 yield s
             return
 
-        # 도구 호출 → 검색 실행 후 결과 기반 답변
+        # 도구 호출 → 실행 후 결과 기반 답변
         self.history.append({
             "role": "assistant",
             "content": msg.content or "",
@@ -132,16 +166,11 @@ class LLM:
                 for tc in msg.tool_calls
             ],
         })
-        yield config.SEARCH_FILLER   # 검색 동안 먼저 읽어줄 멘트
+        # 도구 종류에 맞는 멘트를 먼저 읽어 침묵을 메움
+        names = [tc.function.name for tc in msg.tool_calls]
+        yield config.MUSIC_FILLER if "play_music" in names else config.SEARCH_FILLER
         for tc in msg.tool_calls:
-            if tc.function.name == "web_search":
-                try:
-                    q = json.loads(tc.function.arguments).get("query", "")
-                except Exception:
-                    q = ""
-                result = await web_search(q)
-            else:
-                result = "지원하지 않는 도구입니다."
+            result = await self._run_tool(tc.function.name, tc.function.arguments)
             self.history.append({"role": "tool", "tool_call_id": tc.id, "content": result})
 
         async for s in self._stream_answer(self.history):

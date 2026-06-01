@@ -2,6 +2,7 @@
 openai>=1.40.0          # DeepSeek V4 / Ollama (OpenAI 호환 API), 도구 호출
 python-dotenv>=1.0.0    # .env 로드
 httpx>=0.27.0           # 웹 검색(Serper) 호출 (openai 의존성으로도 설치됨)
+yt-dlp>=2025.1.1        # 음악 재생: 유튜브 검색(키 불필요)
 
 # --- Audio I/O ---
 sounddevice>=0.4.6      # 마이크 캡처 + 스피커 재생

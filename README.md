@@ -57,6 +57,9 @@ python main.py
 | `WHISPER_LANG`      | `ko` | STT 언어 고정 |
 | `FOLLOW_UP`         | `true` | 답변 후 호출어 없이 바로 다시 듣기(연속 대화) |
 | `LISTEN_TIMEOUT_S`  | `8.0` | 듣기 상태에서 무발화 시 호출어 대기로 복귀 |
+| `SERPER_API_KEY`    | (빈값) | 웹 검색(구글/Serper) 키. 있으면 `web_search` 도구 활성화 |
+| `MUSIC_ENABLED`     | `true` | `play_music` 도구(유튜브 검색→브라우저 재생) |
+| `BROWSER_APP`       | `Google Chrome` | 음악 재생에 쓸 브라우저(macOS 앱 이름) |
 | `SUPERTONIC_VOICE`  | `F1` | 음성 (M1~M5 / F1~F5) |
 | `SUPERTONIC_LANG`   | `ko` | 합성 언어 |
 | `SUPERTONIC_STEPS`  | `8`  | ↓ 줄이면 더 빠름(품질↓) |
