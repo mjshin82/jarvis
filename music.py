@@ -55,8 +55,16 @@ async def start_ffmpeg_pump(vid: str, sink):
 async def stop_ffmpeg_pump(handle):
     proc, task = handle
     task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
     if proc.returncode is None:
         proc.terminate()
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=2)
+    except asyncio.TimeoutError:
+        proc.kill()
 
 
 # --- Chrome 폴백 (기존 동작) ---

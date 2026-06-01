@@ -38,8 +38,7 @@ _TOOL_PLAY_MUSIC = {
     "type": "function",
     "function": {
         "name": "play_music",
-        "description": "유튜브에서 노래/음악/영상을 찾아 브라우저로 재생한다. "
-                       "사용자가 '○○ 틀어줘/들려줘/재생해줘' 처럼 음악·영상 재생을 요청할 때 사용.",
+        "description": "유튜브에서 노래/음악을 찾아 재생한다. 사용자가 '○○ 틀어줘/들려줘/재생해줘' 처럼 음악 재생을 요청할 때 사용.",
         "parameters": {
             "type": "object",
             "properties": {"query": {"type": "string", "description": "곡/아티스트/영상 검색어"}},
@@ -52,8 +51,7 @@ _TOOL_STOP_MUSIC = {
     "type": "function",
     "function": {
         "name": "stop_music",
-        "description": "재생 중인 음악/영상을 멈춘다(브라우저의 유튜브 탭을 닫음). "
-                       "'꺼줘/멈춰/그만/정지/스톱' 등 재생 중지 요청 시 사용.",
+        "description": "재생 중인 음악을 멈춘다. '꺼줘/멈춰/그만/정지/스톱' 등 재생 중지 요청 시 사용.",
         "parameters": {"type": "object", "properties": {}},
     },
 }

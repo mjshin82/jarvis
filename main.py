@@ -28,7 +28,13 @@ from wake import WakeWord
 
 async def main():
     backend = make_backend()
-    await backend.start()
+    try:
+        await backend.start()
+    except Exception as e:
+        print(f"[audio] AEC 백엔드 기동 실패 → sounddevice 폴백: {e}")
+        from audio_backend import SounddeviceBackend
+        backend = SounddeviceBackend()
+        await backend.start()
     mic = Microphone(backend)
     stt = STT()
     llm = LLM(backend)

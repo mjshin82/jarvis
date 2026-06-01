@@ -25,7 +25,7 @@ final class Audiod {
                                 channels: 1, interleaved: false)!
     let micFmt = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: MIC_SR,
                                channels: 1, interleaved: false)!
-    var voicePending = 0
+    var voiceCompleted = 0
     let pendLock = NSLock()
 
     func start() throws {
@@ -69,12 +69,9 @@ final class Audiod {
     }
     func scheduleVoice(_ pcm: [Float]) {
         guard let b = makeBuffer(pcm) else { return }
-        pendLock.lock(); voicePending += 1; pendLock.unlock()
         voice.scheduleBuffer(b) {
-            self.pendLock.lock(); self.voicePending -= 1
-            let empty = self.voicePending == 0
-            self.pendLock.unlock()
-            if empty { sendEvent("{\"voice\":\"drained\"}") }
+            self.pendLock.lock(); self.voiceCompleted += 1; let n = self.voiceCompleted; self.pendLock.unlock()
+            sendEvent("{\"vc\":\(n)}")
         }
     }
     func scheduleMusic(_ pcm: [Float]) {
@@ -82,13 +79,15 @@ final class Audiod {
         music.scheduleBuffer(b, completionHandler: nil)
     }
     func flushVoice() {
-        voice.stop(); pendLock.lock(); voicePending = 0; pendLock.unlock(); voice.play()
+        voice.stop(); voice.play()
     }
     func stopMusic() { music.stop(); music.play() }
 }
 
 func bytesToFloats(_ d: Data) -> [Float] {
-    return d.withUnsafeBytes { raw in Array(raw.bindMemory(to: Float.self)) }
+    var out = [Float](repeating: 0, count: d.count / 4)
+    out.withUnsafeMutableBytes { d.copyBytes(to: $0) }
+    return out
 }
 
 let app = Audiod()
@@ -104,8 +103,8 @@ while true {
     buf.append(chunk)
     while buf.count >= 5 {
         let type = buf[buf.startIndex]
-        let len = buf.subdata(in: buf.startIndex+1 ..< buf.startIndex+5)
-            .withUnsafeBytes { $0.load(as: UInt32.self).littleEndian }
+        let lenBytes = [UInt8](buf.subdata(in: buf.startIndex+1 ..< buf.startIndex+5))
+        let len = UInt32(lenBytes[0]) | (UInt32(lenBytes[1])<<8) | (UInt32(lenBytes[2])<<16) | (UInt32(lenBytes[3])<<24)
         if buf.count < 5 + Int(len) { break }
         let payload = buf.subdata(in: buf.startIndex+5 ..< buf.startIndex+5+Int(len))
         buf.removeSubrange(buf.startIndex ..< buf.startIndex+5+Int(len))

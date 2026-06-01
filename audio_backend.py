@@ -139,8 +139,10 @@ class AECBackend(AudioBackend):
         self._reader_task = None
         self._mic_q: asyncio.Queue = None
         self._dec = proto.FrameDecoder()
-        self._voice_active = 0
+        self._voice_sent = 0
+        self._voice_done = 0
         self._music = None
+        self._restarted = False
 
     @property
     def supports_inapp_audio(self):
@@ -167,19 +169,32 @@ class AECBackend(AudioBackend):
         )
         self._reader_task = asyncio.create_task(self._read_loop())
 
+    def _handle_event(self, ev: dict):
+        if "vc" in ev:
+            self._voice_done = max(self._voice_done, int(ev["vc"]))
+
     async def _read_loop(self):
         while True:
             chunk = await self._proc.stdout.read(4096)
             if not chunk:
+                if not self._restarted:
+                    self._restarted = True
+                    print("[audio] 데몬 종료 감지 → 재기동 시도")
+                    try:
+                        cmd = self._resolve_cmd()
+                        self._proc = await asyncio.create_subprocess_exec(
+                            *cmd, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE)
+                        continue
+                    except Exception as e:
+                        print(f"[audio] 데몬 재기동 실패: {e}")
+                print("[audio] 데몬 사용 불가 — 오디오 입력 중단")
                 break
             self._dec.feed(chunk)
             for mtype, payload in self._dec:
                 if mtype == proto.MIC:
                     await self._mic_q.put(proto.pcm_to_array(payload).copy())
                 elif mtype == proto.EVENT:
-                    ev = proto.decode_event(payload)
-                    if ev.get("voice") == "drained":
-                        self._voice_active = 0
+                    self._handle_event(proto.decode_event(payload))
 
     async def close(self):
         if self._music:
@@ -198,16 +213,16 @@ class AECBackend(AudioBackend):
         await self._proc.stdin.drain()
 
     async def play_voice(self, pcm, sr):
-        pcm48 = _resample_mono(pcm, sr, 48000)
-        self._voice_active += 1
+        pcm48 = await asyncio.to_thread(_resample_mono, pcm, sr, 48000)
+        self._voice_sent += 1
         await self._send(proto.encode_pcm(proto.PLAY_VOICE, pcm48))
 
     def flush_voice(self):
-        self._voice_active = 0
+        self._voice_done = self._voice_sent
         self._proc.stdin.write(proto.encode(proto.FLUSH_VOICE))
 
     def is_speaking(self):
-        return self._voice_active > 0
+        return self._voice_sent > self._voice_done
 
     async def play_music(self, query):
         from music import resolve_track, start_ffmpeg_pump
