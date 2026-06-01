@@ -15,7 +15,6 @@ from openai import AsyncOpenAI
 
 import config
 from search import web_search
-from music import play_music, stop_music
 
 # 문장 끝으로 볼 부호 (한국어/영어).
 _SENTENCE_END = re.compile(r"[.!?。…？！]\s*$|[\n]")
@@ -68,28 +67,29 @@ def _split_sentences(text: str):
 
 
 class LLM:
-    def __init__(self):
-        self.backend = config.LLM_BACKEND
+    def __init__(self, backend=None):
+        self.backend = backend
+        self._llm_backend = config.LLM_BACKEND
         self.client = None
         self.model = None
 
-        if self.backend == "mock":
+        if self._llm_backend == "mock":
             print(f"[llm] ⚠️  MOCK 모드: '{config.MOCK_MESSAGE}' 로만 응답합니다.")
-        elif self.backend == "remote":
+        elif self._llm_backend == "remote":
             self.client = AsyncOpenAI(
                 api_key=config.DEEPSEEK_API_KEY, base_url=config.DEEPSEEK_BASE_URL,
             )
             self.model = config.DEEPSEEK_MODEL
             print(f"[llm] REMOTE(DeepSeek) 모드: {self.model}")
-        elif self.backend == "local":
+        elif self._llm_backend == "local":
             self.client = AsyncOpenAI(api_key="ollama", base_url=config.OLLAMA_BASE_URL)
             self.model = config.LOCAL_MODEL
             print(f"[llm] LOCAL(Ollama) 모드: {self.model} @ {config.OLLAMA_BASE_URL}")
         else:
-            raise ValueError(f"알 수 없는 LLM_BACKEND: {self.backend!r} (mock|remote|local)")
+            raise ValueError(f"알 수 없는 LLM_BACKEND: {self._llm_backend!r} (mock|remote|local)")
 
         # local: 모델을 메모리에 유지(콜드 로드 방지). 매 호출에 keep_alive 전달.
-        self.extra = {"keep_alive": config.OLLAMA_KEEP_ALIVE} if self.backend == "local" else {}
+        self.extra = {"keep_alive": config.OLLAMA_KEEP_ALIVE} if self._llm_backend == "local" else {}
 
         # 사용 가능한 도구 구성 (클라이언트 있을 때만)
         self.tools = []
@@ -128,9 +128,9 @@ class LLM:
         if name == "web_search":
             return await web_search(args.get("query", ""))
         if name == "play_music":
-            return await play_music(args.get("query", ""))
+            return await self.backend.play_music(args.get("query", ""))
         if name == "stop_music":
-            return await stop_music()
+            return await self.backend.stop_music()
         return "지원하지 않는 도구입니다."
 
     async def warmup(self):
@@ -176,7 +176,7 @@ class LLM:
         self.history.append({"role": "user", "content": user_text})
         self.last_tool_names = []
 
-        if self.backend == "mock":
+        if self._llm_backend == "mock":
             self.history.append({"role": "assistant", "content": config.MOCK_MESSAGE})
             yield config.MOCK_MESSAGE
             return

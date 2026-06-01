@@ -31,7 +31,7 @@ async def main():
     await backend.start()
     mic = Microphone(backend)
     stt = STT()
-    llm = LLM()
+    llm = LLM(backend)
     tts = TTS()
     player = Player(backend)
     wake = WakeWord()
