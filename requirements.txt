@@ -13,10 +13,12 @@ silero-vad>=5.1         # torch 기반 VAD
 # --- Wake word (호출어 'Hey Jarvis') ---
 openwakeword>=0.6.0     # 사전학습 hey_jarvis 모델, ONNX 추론. 모델은 첫 실행시 자동 다운로드
 
-# --- STT (로컬) ---
-useful-moonshine-onnx   # Moonshine ONNX 추론
-# 설치: pip install useful-moonshine-onnx@git+https://github.com/usefulsensors/moonshine.git#subdirectory=moonshine-onnx
+# --- STT (Moonshine 한국어, 로컬) ---
+useful-moonshine-onnx   # Moonshine ONNX 추론 엔진(MoonshineOnnxModel)
 onnxruntime>=1.17.0
+huggingface_hub         # 한국어 모델/토크나이저 다운로드 (보통 위 패키지가 함께 설치)
+tokenizers              # 한국어 토크나이저 디코딩
+# 모델: onnx-community/moonshine-base-ko-ONNX (첫 실행 시 자동 다운로드)
 
 # --- TTS (로컬) ---
 supertonic>=1.3.1       # Supertonic 온디바이스 TTS (ONNX). 모델은 첫 실행시 HF 자동 다운로드

@@ -18,7 +18,7 @@
 | `config.py`   | 오디오 포맷·모델·백엔드·호출어 등 전역 설정 |
 | `audio_io.py` | 마이크 캡처 + VAD(발화) + 호출어 감지 훅 |
 | `wake.py`     | openWakeWord 'Hey Jarvis' 감지 (로컬) |
-| `stt.py`      | Moonshine 추론 (→ 텍스트) |
+| `stt.py`      | Moonshine **한국어** 추론 (base-ko, → 텍스트) |
 | `llm.py`      | LLM 백엔드(mock/remote/local) + **문장 단위 청킹** |
 | `tts.py`      | Supertonic 추론 (→ 오디오, 로컬) |
 | `player.py`   | 순서 보장 재생 + 효과음(`enqueue_file`) + barge-in `flush` |
