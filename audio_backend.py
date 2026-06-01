@@ -1,7 +1,11 @@
 """오디오 입출력 추상화. 구현: SounddeviceBackend(폴백), AECBackend(Swift 데몬)."""
 import abc
+import asyncio
+import queue
 
 import numpy as np
+
+import config
 
 
 class AudioBackend(abc.ABC):
@@ -41,3 +45,83 @@ class AudioBackend(abc.ABC):
     def supports_inapp_audio(self) -> bool:
         """True 면 음악을 엔진 오디오로 재생(AEC 대상), False 면 외부(Chrome)."""
         return False
+
+
+class SounddeviceBackend(AudioBackend):
+    """기존 동작: sd.InputStream 마이크, sd.play voice(순서 보장), Chrome 음악."""
+
+    def __init__(self):
+        self._blocks = queue.Queue()
+        self._voice_q: asyncio.Queue = None
+        self._playing = False
+        self._stream = None
+        self._worker = None
+
+    def _callback(self, indata, frames, time_info, status):
+        if status:
+            print(f"[audio] {status}")
+        self._blocks.put(indata[:, 0].copy())
+
+    async def start(self):
+        import sounddevice as sd
+        self._voice_q = asyncio.Queue()
+        self._stream = sd.InputStream(
+            samplerate=config.SAMPLE_RATE, channels=config.CHANNELS,
+            blocksize=config.BLOCK_SIZE, dtype="float32", callback=self._callback,
+        )
+        self._stream.start()
+        self._worker = asyncio.create_task(self._voice_worker())
+
+    async def close(self):
+        if self._worker:
+            self._worker.cancel()
+        if self._stream:
+            self._stream.stop(); self._stream.close()
+
+    async def mic_frames(self):
+        loop = asyncio.get_running_loop()
+        while True:
+            block = await loop.run_in_executor(None, self._blocks.get)
+            yield block
+
+    async def _voice_worker(self):
+        import sounddevice as sd
+        while True:
+            pcm, sr = await self._voice_q.get()
+            if len(pcm):
+                self._playing = True
+                try:
+                    await asyncio.to_thread(lambda: (sd.play(pcm, sr), sd.wait()))
+                finally:
+                    self._playing = False
+
+    async def play_voice(self, pcm, sr):
+        await self._voice_q.put((pcm, sr))
+
+    def flush_voice(self):
+        import sounddevice as sd
+        while not self._voice_q.empty():
+            try:
+                self._voice_q.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+        sd.stop()
+
+    def is_speaking(self):
+        return self._playing or (self._voice_q is not None and not self._voice_q.empty())
+
+    async def play_music(self, query):
+        return await _chrome_play_music(query)
+
+    async def stop_music(self):
+        return await _chrome_stop_music()
+
+
+async def _chrome_play_music(query: str) -> str:
+    from music import chrome_play
+    return await chrome_play(query)
+
+
+async def _chrome_stop_music() -> str:
+    from music import chrome_stop
+    return await chrome_stop()
