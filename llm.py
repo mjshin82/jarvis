@@ -15,7 +15,7 @@ from openai import AsyncOpenAI
 
 import config
 from search import web_search
-from music import play_music
+from music import play_music, stop_music
 
 # 문장 끝으로 볼 부호 (한국어/영어).
 _SENTENCE_END = re.compile(r"[.!?。…？！]\s*$|[\n]")
@@ -46,6 +46,16 @@ _TOOL_PLAY_MUSIC = {
             "properties": {"query": {"type": "string", "description": "곡/아티스트/영상 검색어"}},
             "required": ["query"],
         },
+    },
+}
+
+_TOOL_STOP_MUSIC = {
+    "type": "function",
+    "function": {
+        "name": "stop_music",
+        "description": "재생 중인 음악/영상을 멈춘다(브라우저의 유튜브 탭을 닫음). "
+                       "'꺼줘/멈춰/그만/정지/스톱' 등 재생 중지 요청 시 사용.",
+        "parameters": {"type": "object", "properties": {}},
     },
 }
 
@@ -90,7 +100,8 @@ class LLM:
                 base += "\n최신·실시간 정보가 필요하면 web_search 도구로 검색해 답한다."
             if config.MUSIC_ENABLED:
                 self.tools.append(_TOOL_PLAY_MUSIC)
-                base += "\n음악/영상 재생 요청은 play_music 도구를 사용한다."
+                self.tools.append(_TOOL_STOP_MUSIC)
+                base += "\n음악/영상 재생은 play_music, 중지는 stop_music 도구를 사용한다."
         self.use_tools = bool(self.tools)
         if self.use_tools:
             names = ", ".join(t["function"]["name"] for t in self.tools)
@@ -117,6 +128,8 @@ class LLM:
             return await web_search(args.get("query", ""))
         if name == "play_music":
             return await play_music(args.get("query", ""))
+        if name == "stop_music":
+            return await stop_music()
         return "지원하지 않는 도구입니다."
 
     async def warmup(self):
@@ -200,7 +213,12 @@ class LLM:
         })
         # 도구 종류에 맞는 멘트를 먼저 읽어 침묵을 메움
         names = [tc.function.name for tc in msg.tool_calls]
-        yield config.MUSIC_FILLER if "play_music" in names else config.SEARCH_FILLER
+        if "play_music" in names:
+            yield config.MUSIC_FILLER
+        elif "stop_music" in names:
+            yield config.STOP_FILLER
+        elif "web_search" in names:
+            yield config.SEARCH_FILLER
         for tc in msg.tool_calls:
             result = await self._run_tool(tc.function.name, tc.function.arguments)
             self.history.append({"role": "tool", "tool_call_id": tc.id, "content": result})

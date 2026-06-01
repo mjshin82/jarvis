@@ -41,6 +41,48 @@ def _open_in_browser(url: str) -> bool:
     return True
 
 
+def _stop_sync() -> str:
+    """크롬에 열린 유튜브 탭을 닫아 재생을 멈춘다 (macOS AppleScript)."""
+    app = config.BROWSER_APP
+    # 크롬이 실행 중일 때만 (tell 이 앱을 새로 띄우지 않도록 running 체크)
+    script = f'''
+    if application "{app}" is running then
+      tell application "{app}"
+        set n to 0
+        repeat with w in windows
+          repeat with t in (tabs of w)
+            try
+              if (URL of t) contains "youtube.com" then
+                close t
+                set n to n + 1
+              end if
+            end try
+          end repeat
+        end repeat
+        return n
+      end tell
+    else
+      return -1
+    end if
+    '''
+    try:
+        r = subprocess.run(["osascript", "-e", script],
+                           capture_output=True, text=True, timeout=10)
+        out = (r.stdout or "").strip()
+        n = int(out) if out.lstrip("-").isdigit() else 0
+    except Exception as e:
+        return f"음악을 끄지 못했습니다: {e}"
+    if n < 0:
+        return "브라우저가 실행 중이 아닙니다."
+    if n == 0:
+        return "재생 중인 음악이 없습니다."
+    return f"음악을 껐습니다(탭 {n}개)."
+
+
+async def stop_music() -> str:
+    return await asyncio.to_thread(_stop_sync)
+
+
 async def play_music(query: str) -> str:
     def work():
         try:
