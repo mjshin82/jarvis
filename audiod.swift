@@ -31,29 +31,47 @@ final class Audiod {
     func start() throws {
         let input = engine.inputNode
         try input.setVoiceProcessingEnabled(true)
-        let inFmt = input.outputFormat(forBus: 0)
-        let conv = AVAudioConverter(from: inFmt, to: micFmt)!
 
         engine.attach(voice); engine.attach(music)
         engine.connect(voice, to: engine.mainMixerNode, format: playFmt)
         engine.connect(music, to: engine.mainMixerNode, format: playFmt)
 
-        input.installTap(onBus: 0, bufferSize: 1024, format: inFmt) { buf, _ in
-            let ratio = MIC_SR / inFmt.sampleRate
-            let cap = AVAudioFrameCount(Double(buf.frameLength) * ratio + 64)
+        var conv: AVAudioConverter? = nil      // (모노 입력SR → 16k 모노) SR 변환 전용
+        var srcFmt: AVAudioFormat? = nil
+        // format: nil → 노드의 실제 출력 포맷 사용
+        input.installTap(onBus: 0, bufferSize: 1024, format: nil) { buf, _ in
+            guard let rc = buf.floatChannelData else { return }
+            let n = Int(buf.frameLength)
+            if n == 0 { return }
+            // 멀티채널(VPIO 집계) → 채널0(처리된 모노 마이크)만 추출해 모노 버퍼 구성.
+            // (AVAudioConverter 의 다채널→모노 다운믹스가 무음을 내는 문제 회피)
+            if srcFmt == nil || srcFmt!.sampleRate != buf.format.sampleRate {
+                srcFmt = AVAudioFormat(commonFormat: .pcmFormatFloat32,
+                                       sampleRate: buf.format.sampleRate,
+                                       channels: 1, interleaved: false)
+                conv = AVAudioConverter(from: srcFmt!, to: self.micFmt)
+            }
+            guard let sf = srcFmt, let cv = conv,
+                  let mono = AVAudioPCMBuffer(pcmFormat: sf, frameCapacity: AVAudioFrameCount(n))
+            else { return }
+            mono.frameLength = AVAudioFrameCount(n)
+            mono.floatChannelData![0].update(from: rc[0], count: n)
+
+            let ratio = MIC_SR / sf.sampleRate
+            let cap = AVAudioFrameCount(Double(n) * ratio + 64)
             guard let out = AVAudioPCMBuffer(pcmFormat: self.micFmt, frameCapacity: cap)
             else { return }
             var err: NSError?
             var fed = false
-            conv.convert(to: out, error: &err) { _, status in
+            cv.convert(to: out, error: &err) { _, status in
                 if fed { status.pointee = .noDataNow; return nil }
-                fed = true; status.pointee = .haveData; return buf
+                fed = true; status.pointee = .haveData; return mono
             }
             if let ch = out.floatChannelData {
-                let n = Int(out.frameLength)
-                send(MIC, Data(bytes: ch[0], count: n * 4))
+                send(MIC, Data(bytes: ch[0], count: Int(out.frameLength) * 4))
             }
         }
+        engine.prepare()
         try engine.start()
         voice.play(); music.play()
     }

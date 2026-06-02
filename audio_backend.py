@@ -164,9 +164,17 @@ class AECBackend(AudioBackend):
     async def start(self):
         self._mic_q = asyncio.Queue()
         cmd = self._resolve_cmd()
+        # 이전 인스턴스가 오디오 장치를 점유하면 출력 초기화 실패(-10875) → 잔여 정리
+        import subprocess
+        subprocess.run(["pkill", "-x", "audiod"], capture_output=True)
+        await asyncio.sleep(0.3)
         self._proc = await asyncio.create_subprocess_exec(
             *cmd, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
         )
+        # 데몬이 기동 직후(엔진 init 실패 등) 죽는지 확인 → 죽으면 예외로 폴백 유도
+        await asyncio.sleep(0.5)
+        if self._proc.returncode is not None:
+            raise RuntimeError(f"audiod 가 기동 직후 종료됨 (code={self._proc.returncode})")
         self._reader_task = asyncio.create_task(self._read_loop())
 
     def _handle_event(self, ev: dict):
@@ -203,6 +211,10 @@ class AECBackend(AudioBackend):
             self._reader_task.cancel()
         if self._proc and self._proc.returncode is None:
             self._proc.terminate()
+            try:
+                await asyncio.wait_for(self._proc.wait(), timeout=2)
+            except asyncio.TimeoutError:
+                self._proc.kill()       # 장치 점유 방지: 확실히 종료
 
     async def mic_frames(self):
         # 데몬은 변환 후 가변 크기 블록을 보내므로, VAD 가 요구하는 정확히
@@ -236,10 +248,10 @@ class AECBackend(AudioBackend):
         from music import resolve_track, start_ffmpeg_pump
         await self.stop_music()
         track = await resolve_track(query)
-        if not track:
+        if not track or not track[2]:
             return f"'{query}' 에 맞는 음악을 찾지 못했습니다."
-        vid, title = track
-        self._music = await start_ffmpeg_pump(vid, self._send_music)
+        _vid, title, url = track
+        self._music = await start_ffmpeg_pump(url, self._send_music)
         return f"재생 시작: {title}"
 
     async def _send_music(self, pcm48):

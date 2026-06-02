@@ -20,23 +20,25 @@ def _resolve_sync(query: str):
     if not entries:
         return None
     e = entries[0]
-    return e.get("id"), e.get("title", "")
+    # (video_id, 제목, 직접 오디오 스트림 URL) — ffmpeg 은 watch 페이지가 아닌
+    # 이 직접 URL 을 받아야 디코드된다.
+    return e.get("id"), e.get("title", ""), e.get("url")
 
 
 async def resolve_track(query: str):
     return await asyncio.to_thread(_resolve_sync, query)
 
 
-def _ffmpeg_cmd(vid: str):
-    url = f"https://www.youtube.com/watch?v={vid}"
-    return ["ffmpeg", "-loglevel", "quiet", "-i", url,
-            "-f", "f32le", "-ac", "1", "-ar", "48000", "pipe:1"]
+def _ffmpeg_cmd(url: str):
+    return ["ffmpeg", "-loglevel", "quiet", "-nostdin",
+            "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5",
+            "-i", url, "-f", "f32le", "-ac", "1", "-ar", "48000", "pipe:1"]
 
 
-async def start_ffmpeg_pump(vid: str, sink):
+async def start_ffmpeg_pump(url: str, sink):
     """ffmpeg 디코드 → 48k mono f32 청크를 sink(pcm) 코루틴으로 전달. handle 반환."""
     proc = await asyncio.create_subprocess_exec(
-        *_ffmpeg_cmd(vid), stdout=asyncio.subprocess.PIPE,
+        *_ffmpeg_cmd(url), stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.DEVNULL,
     )
 
@@ -82,7 +84,7 @@ async def chrome_play(query: str) -> str:
     track = await resolve_track(query)
     if not track or not track[0]:
         return f"'{query}' 에 맞는 영상을 찾지 못했습니다."
-    vid, title = track
+    vid, title, _url = track
     if _open_in_browser(f"https://www.youtube.com/watch?v={vid}&autoplay=1"):
         return f"재생 시작: {title}"
     return "브라우저를 열지 못했습니다."
