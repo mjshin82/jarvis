@@ -93,6 +93,11 @@ SIM_EXIT_FILLER = "시뮬레이션을 종료하고 평소 모드로 돌아갑니
 # 키가 없거나 비활성이면 자비스 본체 LLM(local) 으로 폴백.
 MEET_REMOTE_ENABLED = os.getenv("MEET_REMOTE_ENABLED", "true").lower() in ("1", "true", "yes")
 MEET_REMOTE_MODEL = os.getenv("MEET_REMOTE_MODEL", "deepseek-chat")
+# 회의 자막 중계 (meeting-web). 둘 다 비어있으면 비활성 — 콘솔 출력만.
+RELAY_URL = os.getenv("RELAY_URL", "")            # ws://localhost:8787 또는 wss://...workers.dev
+RELAY_TOKEN = os.getenv("RELAY_TOKEN", "")        # meeting-web 의 RELAY_TOKEN 과 일치해야 함
+RELAY_TIMEOUT_S = float(os.getenv("RELAY_TIMEOUT_S", "5"))
+
 MEET_CONTEXT = os.getenv("MEET_CONTEXT", (
     "First introductory meeting between a Korean indie game studio (Concode) and a global "
     "game publisher. Topics likely include the studio's team, prior title 'The Way Home', "

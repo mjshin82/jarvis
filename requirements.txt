@@ -7,6 +7,7 @@ prompt_toolkit>=3.0     # 콘솔 하단 고정 입력 프롬프트(로그는 위
 num2words>=0.5.14       # TTS 전처리: 숫자 → 한국어/일본어 단어
 RealtimeSTT>=1.0        # 회의 모드(/meet) 실시간 자막용. 평상시 STT 와 별도
 psutil>=7.0             # CPU/메모리 측정 (PoC 스크립트용)
+websockets>=13.0        # 회의 모드 outbound WebSocket publisher (meeting-web 중계)
 
 # --- Audio I/O ---
 sounddevice>=0.4.6      # 마이크 캡처 + 스피커 재생

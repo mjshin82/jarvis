@@ -315,7 +315,8 @@ async def main():
         await _begin_meeting(meta)
 
     async def _begin_meeting(meta) -> None:
-        """메타가 모인 다음 호출. 본체 마이크 양보 + RealtimeSTT 시작."""
+        """메타가 모인 다음 호출. 본체 마이크 양보 + RealtimeSTT 시작.
+        RELAY_URL/RELAY_TOKEN 이 설정돼 있으면 outbound ws 로 자막 중계도 활성."""
         from live_translate import MeetingSession
         mic.pause()
         try:
@@ -328,6 +329,23 @@ async def main():
             await sess.start()
             meeting_session["obj"] = sess
             console.log(f"🎤 회의를 시작합니다. 회의 번호: {meta.key}")
+            # 외부 중계 활성 (옵션)
+            if config.RELAY_URL and config.RELAY_TOKEN:
+                from relay_client import RelayClient
+                relay = RelayClient(
+                    config.RELAY_URL, config.RELAY_TOKEN, meta,
+                    on_log=console.log,
+                    connect_timeout=config.RELAY_TIMEOUT_S,
+                )
+                ok = await relay.connect()
+                if ok:
+                    sess.add_listener(relay.emit_async)
+                    sess._relay = relay   # stop() 에서 close
+                    # http 보기 URL 안내 (ws → http 로 단순 치환)
+                    view_base = config.RELAY_URL.replace("wss://", "https://").replace("ws://", "http://")
+                    console.log(f"🌐 중계 활성: {view_base}/m/{meta.key}")
+                else:
+                    console.log("🌐 중계 서버 연결 실패 — 콘솔만으로 진행합니다.")
         except Exception as ex:
             mic.resume()
             console.log(f"회의 모드 시작 실패: {ex}")

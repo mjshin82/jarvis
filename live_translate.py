@@ -125,11 +125,20 @@ class MeetingSession:
         self._consumer_task: asyncio.Task | None = None
         self._listen_task: asyncio.Task | None = None
         self._partial_last = ""
+        # 외부 listener (예: 웹 중계). _emit 의 fan-out 대상.
+        self._listeners: list = []
+        # 회의 진행 동안 보관할 외부 리소스 (예: RelayClient) — stop() 에서 close
+        self._relay = None
         # 번역기 (start() 에서 결정)
         self._tx_client = None
         self._tx_model = ""
         self._tx_system = ""
         self._tx_label = ""   # 화면 안내용
+
+    def add_listener(self, callback) -> None:
+        """매 _emit 호출 시 callback(kind, text) 가 함께 불린다.
+        callback 은 동기 함수든 코루틴 함수든 OK (fire-and-forget)."""
+        self._listeners.append(callback)
 
     def _setup_translator(self) -> None:
         """DeepSeek 우선, 키 없으면 자비스 본체 LLM 로 폴백.
@@ -223,6 +232,13 @@ class MeetingSession:
             except Exception:
                 self._consumer_task.cancel()
         self._consumer_task = None
+        # 외부 listener 리소스(예: RelayClient) 정리 — end 송신 + 소켓 close
+        if self._relay is not None:
+            try:
+                await self._relay.close()
+            except Exception:
+                pass
+            self._relay = None
         self.log("🎤 회의 모드 종료.")
 
     # --- 내부 ---
@@ -263,9 +279,9 @@ class MeetingSession:
                 pass
 
     def _emit(self, kind: str, text: str) -> None:
-        """회의 이벤트를 외부로 출력. 지금은 콘솔, 추후 WebSocket 같은 곳으로 같이 보냄.
-        kind: 'source' (원문) | 'translation' (번역) | 'info' (안내) | 'gap' (구분)"""
-        # 향후 self._listeners 같은 리스트에 콜백 등록 후 여기서 fan-out.
+        """회의 이벤트를 콘솔 + 등록된 listener 들로 fan-out.
+        kind: 'source' | 'translation_ko' | 'translation_en' | 'info' | 'gap' | 'partial'"""
+        # 1) 콘솔 출력 (기존)
         prefix = {
             "source": "🧑",
             "translation_ko": "🌐",
@@ -275,10 +291,20 @@ class MeetingSession:
         }.get(kind, "")
         if kind == "gap":
             self.log("")
+        elif kind == "partial":
+            pass    # 콘솔엔 partial 안 찍음 (status 영역이 따로 표시)
         elif prefix:
             self.log(f"{prefix} {text}")
         else:
             self.log(text)
+        # 2) listener fan-out (fire-and-forget — listener 실패가 회의 막지 않게)
+        for cb in self._listeners:
+            try:
+                result = cb(kind, text)
+                if asyncio.iscoroutine(result):
+                    asyncio.create_task(result)
+            except Exception as e:
+                self.log(f"[meet] listener error: {e}")
 
     async def _consume_finals(self):
         """확정 발화 처리 — 출력 + 양방향 번역. 메인 이벤트 루프에서 안전하게.
