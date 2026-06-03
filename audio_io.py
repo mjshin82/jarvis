@@ -25,6 +25,28 @@ class Microphone:
         )
         self._blocks: queue.Queue = queue.Queue()
 
+    def _resolve_device(self):
+        """MIC_DEVICE 환경변수 우선. 비었으면 입력 채널 있는 첫 번째 물리 마이크 자동 선택
+        (BlackHole 같은 가상장치 회피)."""
+        spec = config.MIC_DEVICE.strip()
+        if spec:
+            if spec.isdigit():
+                return int(spec)
+            for i, d in enumerate(sd.query_devices()):
+                if d["max_input_channels"] > 0 and spec.lower() in d["name"].lower():
+                    return i
+            print(f"[audio] MIC_DEVICE='{spec}' 매칭 실패 → 기본 장치 사용")
+            return None
+        # 자동: BlackHole/Loopback/Aggregate 같은 가상장치는 건너뛰기
+        skip = ("blackhole", "loopback", "aggregate", "teams", "soundflower")
+        for i, d in enumerate(sd.query_devices()):
+            if d["max_input_channels"] <= 0:
+                continue
+            if any(s in d["name"].lower() for s in skip):
+                continue
+            return i
+        return None
+
     def _callback(self, indata, frames, time_info, status):
         # sounddevice 가 오디오 스레드에서 호출. 복사해서 큐에 적재만 한다.
         if status:
@@ -45,12 +67,17 @@ class Microphone:
           되먹임되어 발화로 잡히는 것을 방지. (호출어 감지는 그대로 유지)
         """
         loop = asyncio.get_running_loop()
+        device = self._resolve_device()
+        if device is not None:
+            info = sd.query_devices(device)
+            print(f"[audio] 입력 장치: [{device}] {info['name']}")
         stream = sd.InputStream(
             samplerate=config.SAMPLE_RATE,
             channels=config.CHANNELS,
             blocksize=config.BLOCK_SIZE,
             dtype="float32",
             callback=self._callback,
+            device=device,
         )
         with stream:
             collecting = False

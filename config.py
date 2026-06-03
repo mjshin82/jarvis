@@ -8,6 +8,7 @@ load_dotenv()
 SAMPLE_RATE = 16_000      # Moonshine / silero-vad 둘 다 16kHz 모노 기준
 CHANNELS = 1
 BLOCK_SIZE = 512          # silero-vad 권장 프레임 크기(16kHz에서 32ms)
+MIC_DEVICE = os.getenv("MIC_DEVICE", "")  # 입력 장치 이름/인덱스. 비우면 시스템 기본
 
 # --- VAD ---
 VAD_THRESHOLD = 0.5       # 평상시 음성 확률 임계값
