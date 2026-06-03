@@ -23,6 +23,7 @@ from simulation import (
 )
 import coach
 import qa as qabank
+import intents
 
 # 문장 끝으로 볼 부호 (한국어/영어).
 _SENTENCE_END = re.compile(r"[.!?。…？！]\s*$|[\n]")
@@ -237,6 +238,25 @@ class LLM:
         # 4) 첫 라운드
         async for s in self._coach_ask_new():
             yield s
+
+    async def _fast_path(self, intent: tuple, user_text: str):
+        """LLM 우회: 의도가 명백한 음악 명령을 곧장 실행. LLM 호출 0회.
+        history 에는 user/assistant 쌍을 남겨 후속 대화 흐름이 자연스럽게."""
+        name, params = intent
+        self.history.append({"role": "user", "content": user_text})
+        if name == "music_stop":
+            yield config.STOP_FILLER
+            result = await stop_music()
+            self.history.append({"role": "assistant", "content": config.STOP_FILLER})
+            # 결과 멘트는 tool 결과를 그대로 짧게 알려주는 게 자연스러움
+            if result and result != "음악을 껐습니다(탭 0개).":
+                yield result
+        elif name == "music_play":
+            yield config.MUSIC_FILLER
+            result = await play_music(params.get("query", ""))
+            self.history.append({"role": "assistant", "content": config.MUSIC_FILLER})
+            if result:
+                yield result
 
     def _exit_simulation(self) -> str:
         sc = MODE.end()
@@ -478,6 +498,15 @@ class LLM:
             async for s in self._coach_respond(user_text):
                 yield s
             return
+
+        # Fast-path: 명백한 음악 명령은 LLM 호출 없이 곧장 도구 실행
+        # (도구 활성 + 평상시일 때만. 시뮬 안에서는 위에서 이미 분기됨)
+        if self.use_tools and config.MUSIC_ENABLED:
+            intent = intents.classify(user_text)
+            if intent:
+                async for s in self._fast_path(intent, user_text):
+                    yield s
+                return
 
         self.history.append({"role": "user", "content": user_text})
 
