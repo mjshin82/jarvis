@@ -18,10 +18,11 @@ import wordbook
 from search import web_search
 from music import play_music, stop_music
 from simulation import (
-    MODE, list_scenarios, PRACTICE_MODES,
-    classify_choice, ST_ASKING, ST_WAITING_TRY, ST_WAITING_CHOICE,
+    MODE, list_scenarios, load_scenario, PRACTICE_MODES,
+    classify_choice, classify_mode, ST_ASKING, ST_WAITING_TRY, ST_WAITING_CHOICE,
 )
 import coach
+import qa as qabank
 
 # 문장 끝으로 볼 부호 (한국어/영어).
 _SENTENCE_END = re.compile(r"[.!?。…？！]\s*$|[\n]")
@@ -90,11 +91,12 @@ _TOOL_START_SIM = {
                     "type": "string",
                     "enum": list(PRACTICE_MODES),
                     "description": (
-                        "연습 방식. 'guided'=질문+답변예시+사용자시도+피드백 5단계 "
-                        "(트리거: '예시 보면서', '가이드 받으면서', '답변 예시 알려주면서'). "
-                        "'random'=랜덤 질문 빠르게 (트리거: '랜덤으로', '무작위로 물어봐'). "
-                        "'live'=실전 시뮬레이션 인사~마무리 자유 대화 (트리거: '실전처럼', "
-                        "'진짜 미팅처럼', '롤플레이'). 사용자가 명시하지 않으면 'live'."
+                        "연습 방식. 사용자가 명시적으로 말한 경우에만 지정하고, "
+                        "애매하면 절대 추측하지 말고 이 인자를 비워둘 것. "
+                        "'guided'=사용자가 '예시 보면서', '가이드', '답변 예시' 등 명시. "
+                        "'random'=사용자가 '랜덤', '무작위' 등 명시. "
+                        "'live'=사용자가 '실전처럼', '진짜 미팅처럼', '롤플레이' 등 명시. "
+                        "그 외(예: '영어 연습하자', '영어 대화하자')는 비워둘 것."
                     ),
                 },
             },
@@ -194,24 +196,47 @@ class LLM:
               f"{now:%H시 %M분}이다. 날짜·시간 질문은 검색하지 말고 이 정보로 답한다."
         )
 
-    def _enter_simulation(self, key: str | None, mode: str | None) -> tuple[str, str | None]:
-        """시뮬 모드 진입. (안내 멘트, opening or None) 반환.
-        history 를 비워 시나리오·모드 프롬프트가 깨끗한 컨텍스트에서 시작하게 한다.
-        guided/random 은 opening 을 생략 — 코치가 곧장 첫 질문을 던지도록 LLM 에 맡김."""
+    def _resolve_enter(self, key: str | None, mode: str | None):
+        """진입 요청을 분석해 (kind, payload) 반환.
+          ('error',  str)       → 에러 메시지를 그대로 출력
+          ('pending', str)      → 모드 선택 안내 멘트(아직 활성화 안 함)
+          ('begin', (key,mode)) → 실제 시뮬 시작 인자"""
         scenario_key = key or config.SIM_DEFAULT_SCENARIO
-        practice = mode if mode in PRACTICE_MODES else "live"
+        if load_scenario(scenario_key) is None:
+            avail = ", ".join(list_scenarios()) or "(없음)"
+            return ("error", f"시나리오 '{scenario_key}' 를 찾지 못했습니다. 사용 가능: {avail}")
+        if mode not in PRACTICE_MODES:
+            MODE.set_pending(scenario_key)
+            return ("pending", config.SIM_MODE_ASK)
+        return ("begin", (scenario_key, mode))
+
+    async def _begin_practice_yield(self, scenario_key: str, practice: str):
+        """실제 시뮬 진입을 async generator 로 처리.
+        한국어 안내 멘트는 모드 활성화 *전*에 yield 해서 평상시 한국어 음성으로 합성되고,
+        그 다음 모드를 켜서 그 이후의 모든 음성(영어 오프닝/질문)은 영어 보이스로 가게 한다.
+        TTS 가 비동기 큐로 합성하므로 이 순서가 그대로 사용자 청각 경험으로 이어진다."""
+        # 시나리오 검증 (활성화 없이 메타만 읽기)
+        sc_meta = load_scenario(scenario_key)
+        if sc_meta is None:
+            avail = ", ".join(list_scenarios()) or "(없음)"
+            yield f"시나리오 '{scenario_key}' 를 찾지 못했습니다. 사용 가능: {avail}"
+            return
+        label = {"guided": "가이드 연습", "random": "랜덤 질문", "live": "실전 시뮬레이션"}[practice]
+        # 1) 한국어 안내 — 모드 활성화 전이라 한국어 보이스로 합성됨
+        yield f"{config.SIM_ENTER_FILLER} ({sc_meta.name} · {label})"
+        # 2) 모드 활성화 — 이 시점 이후의 yield 는 영어 보이스로 합성됨
         sc = MODE.start(scenario_key, practice=practice)
         if sc is None:
-            avail = ", ".join(list_scenarios()) or "(없음)"
-            return (f"시나리오 '{scenario_key}' 를 찾지 못했습니다. 사용 가능: {avail}", None)
-        # history 리셋. _refresh_now 가 시나리오+모드 프롬프트로 채움
+            yield "시뮬레이션을 시작하지 못했습니다."
+            return
         self.history = [{"role": "system", "content": ""}]
         self._refresh_now()
-        label = {"guided": "가이드 연습", "random": "랜덤 질문", "live": "실전 시뮬레이션"}[practice]
-        notice = f"{config.SIM_ENTER_FILLER} ({sc.name} · {label})"
-        # live 만 미리 정해둔 영어 오프닝을 읽고 시작. guided/random 은 모델이 첫 턴을 만들게 둠.
-        opening = sc.opening if practice == "live" else None
-        return notice, opening
+        # 3) live 면 짧은 영어 오프닝 후 첫 질문
+        if practice == "live" and sc.opening:
+            yield sc.opening
+        # 4) 첫 라운드
+        async for s in self._coach_ask_new():
+            yield s
 
     def _exit_simulation(self) -> str:
         sc = MODE.end()
@@ -219,48 +244,86 @@ class LLM:
         return config.SIM_EXIT_FILLER + (f" ({sc.name} 종료)" if sc else "")
 
     async def _coach_ask_new(self):
-        """새 질문을 만들고 TURN A 출력. (질문 / 예시 답변: / 한번 직접 답해보세요.)"""
+        """QA 뱅크에서 한 항목을 골라 모드에 맞게 출력하고 WAITING_TRY 로 전이.
+          guided: 영어 질문 + '예시 답변: …' + '한번 직접 답해보세요.'
+          random: 영어 질문만
+          live  : 페르소나 톤으로 wording 변형한 영어 질문만"""
         sc = MODE.scenario
-        data = await coach.make_question(
-            self.client, self.model,
-            sc.system_prompt if sc else "",
-            MODE.asked_topics, self.extra,
-        )
-        MODE.current_question = data["question"]
-        MODE.current_example = data["example"]
-        if data.get("topic"):
-            MODE.asked_topics.append(data["topic"])
+        bank = qabank.load(sc.key) if sc else None
+        if bank is None:
+            exit_msg = self._exit_simulation()
+            yield "이 시나리오에는 준비된 질문이 없어요. 연습을 마칠게요."
+            yield exit_msg
+            return
+
+        # 선택
+        if MODE.practice == "random":
+            item = qabank.pick_random(bank, MODE.asked_keys)
+        else:  # guided | live
+            item = qabank.pick_guided(bank, MODE.asked_keys)
+
+        if item is None:
+            exit_msg = self._exit_simulation()   # 모드 종료 먼저 → 한국어 보이스로
+            yield coach.ALL_DONE_PROMPT
+            yield exit_msg
+            return
+
+        MODE.asked_keys.append(qabank.key_of(bank, item))
+        MODE.current_question = item.question
+        MODE.current_example = item.answer
         MODE.state = ST_WAITING_TRY
-        yield data["question"]
-        # random 모드는 예시 없이 곧장 사용자 답을 기다림
-        if MODE.practice == "guided":
-            yield f"{coach.EXAMPLE_PREFIX} {data['example']}"
+
+        # 출력
+        if MODE.practice == "live":
+            phrased = await coach.live_phrase(
+                self.client, self.model, sc.system_prompt, item.question, self.extra,
+            )
+            yield phrased
+        elif MODE.practice == "guided":
+            yield item.question
+            yield f"{coach.EXAMPLE_PREFIX} {item.answer}"
             yield coach.TRY_PROMPT_KO
+        else:  # random
+            yield item.question
 
     async def _coach_evaluate_and_offer(self, attempt: str):
-        """TURN B: 평가 한 줄 + (guided 일 때만) 3-선택 안내. 상태 전이."""
+        """사용자 시도 평가 + 다음 행동.
+          guided: 한국어 코칭 한 줄 + 3-선택 안내 → WAITING_CHOICE
+          random: 한국어 코칭 한 줄 + 자동 다음 질문
+          live  : 페르소나로 짧은 영어 반응 + 자동 다음 질문 (캐릭터 유지)"""
+        if MODE.practice == "live":
+            reaction = await coach.live_react(self.client, self.model, attempt, self.extra)
+            yield reaction
+            MODE.state = ST_ASKING
+            async for s in self._coach_ask_new():
+                yield s
+            return
+
         feedback = await coach.evaluate(
             self.client, self.model,
-            MODE.current_question or "", attempt, self.extra,
+            MODE.current_question or "",
+            MODE.current_example or "",
+            attempt, self.extra,
         )
         yield feedback
         if MODE.practice == "guided":
             yield coach.CHOICES_PROMPT
             MODE.state = ST_WAITING_CHOICE
-        else:
-            # random: 곧장 다음 랜덤 질문
+        else:  # random
             MODE.state = ST_ASKING
             async for s in self._coach_ask_new():
                 yield s
 
     async def _coach_respond(self, user_text: str):
-        """guided/random 상태머신 응답 생성기."""
+        """guided/random/live 상태머신 응답 생성기."""
         choice = classify_choice(user_text)
 
-        # 종료 의도는 상태 무관 즉시 처리
+        # 종료 의도는 상태 무관 즉시 처리.
+        # 모드를 먼저 끄고 한국어 멘트를 yield 해야 평상시 한국어 보이스로 합성됨.
         if choice == "stop":
+            exit_msg = self._exit_simulation()   # MODE 비활성화
             yield coach.STOP_PROMPT_KO
-            yield self._exit_simulation()
+            yield exit_msg
             return
 
         # 첫 진입 직후처럼 아직 질문이 없으면 ASKING 으로 시작
@@ -392,9 +455,26 @@ class LLM:
 
     async def respond(self, user_text: str):
         """async generator: 완성된 문장을 하나씩 yield."""
-        # guided/random 활성 중에는 일반 LLM 흐름을 건너뛰고 상태머신이 응답을 만든다.
-        # (live 와 평상시는 기존 흐름 유지)
-        if MODE.active() and MODE.practice in ("guided", "random") and self.client is not None:
+        # 모드 선택 대기 중 → 사용자 발화에서 모드를 분류해 실제 진입
+        if MODE.is_pending_mode():
+            picked = classify_mode(user_text)
+            # 종료 의도면 깨끗이 빠져나오기
+            if classify_choice(user_text) == "stop":
+                MODE.clear_pending()
+                yield "알겠어요, 연습은 다음에 해요."
+                return
+            if picked is None:
+                yield config.SIM_MODE_RETRY
+                return
+            scenario_key = MODE.pending_scenario or config.SIM_DEFAULT_SCENARIO
+            MODE.clear_pending()   # 활성화는 _begin_practice_yield 가 적절한 타이밍에
+            async for s in self._begin_practice_yield(scenario_key, picked):
+                yield s
+            return
+
+        # 시뮬레이션 활성 중에는 일반 LLM 흐름을 건너뛰고 상태머신이 응답을 만든다.
+        # (live 도 QA 뱅크 기반 상태머신으로 진행. 평상시만 기존 LLM 흐름)
+        if MODE.active() and MODE.practice in PRACTICE_MODES and self.client is not None:
             async for s in self._coach_respond(user_text):
                 yield s
             return
@@ -442,14 +522,19 @@ class LLM:
                 args = json.loads(tc.function.arguments) if tc.function.arguments else {}
             except Exception:
                 args = {}
-            notice, opening = self._enter_simulation(args.get("scenario"), args.get("mode"))
-            yield notice
-            if opening:
-                yield opening
-                return
-            # guided/random 은 코드 상태머신이 첫 라운드의 TURN A 를 만든다.
-            if MODE.active() and MODE.practice in ("guided", "random"):
-                async for s in self._coach_ask_new():
+            # 모델이 모드를 추측해 채워넣는 경향이 있어, 사용자 발화에 실제 모드 키워드가
+            # 없으면 args 의 mode 를 무시한다(= pending 으로 안내).
+            mode_arg = args.get("mode")
+            if mode_arg and classify_mode(user_text) is None:
+                mode_arg = None
+            kind, payload = self._resolve_enter(args.get("scenario"), mode_arg)
+            if kind == "error":
+                yield payload
+            elif kind == "pending":
+                yield payload   # 모드 선택 안내 (한국어 보이스 — 아직 비활성)
+            else:  # begin
+                scenario_key, practice = payload
+                async for s in self._begin_practice_yield(scenario_key, practice):
                     yield s
             return
         if "end_simulation" in names:

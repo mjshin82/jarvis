@@ -40,8 +40,10 @@ class STT:
         if float(np.sqrt(np.mean(audio ** 2))) < _MIN_RMS:
             return ""
         lang = MODE.stt_lang() or self.lang   # 시뮬 모드면 그 언어, 평상시면 기본
-        # 워드북은 한국어 컨텍스트 기준이라 다른 언어에선 끔(영어 발화 환각 방지)
-        prompt = self.initial_prompt if lang == "ko" else None
+        # 상태 특화 프롬프트가 있으면 그걸 우선(좁고 강한 힌트). 없으면 한국어 한정 워드북.
+        prompt = MODE.stt_initial_prompt()
+        if prompt is None and lang == "ko":
+            prompt = self.initial_prompt
         segments, _info = self.model.transcribe(
             audio,
             language=lang,

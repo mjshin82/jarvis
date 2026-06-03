@@ -1,92 +1,60 @@
-"""Guided/Random 모드의 LLM 마이크로 작업.
+"""연습 모드의 LLM 마이크로 작업.
 
-코드 상태머신이 흐름을 통제하고, LLM 은 작고 명확한 두 가지 작업만 한다:
-  make_question(scenario_prompt, asked_topics) → {question, example, topic}
-  evaluate(question, attempt) → 한국어 한 줄 코멘트
+질문/예시 답변은 코드(qa.py 의 QA 뱅크)가 직접 고르고, LLM 은 두 가지만 한다:
+  evaluate(question, expected, attempt) → 한국어 한 줄 코칭 코멘트
+  live_phrase(persona_prompt, question)  → 페르소나 톤으로 질문 wording 변형
+                                            (live 모드 전용; 실패 시 원문 그대로 사용)
 
-LLM 호출은 비스트리밍, max_tokens 제한, JSON 강제 → 4B 모델로도 안정적.
+LLM 호출은 비스트리밍, 짧은 max_tokens → 4B 모델로도 안정적이고 빠르다.
 """
-import json
 from openai import AsyncOpenAI
 
-import config
-
-
-_QUESTION_SYS = (
-    "You generate ONE practice question (in English) and a short model answer "
-    "for an English meeting practice app. The scenario prompt below describes the "
-    "meeting context and what topics naturally come up.\n\n"
-    "Output STRICT JSON with these keys:\n"
-    '  "topic"    : short English label of the topic (e.g. "team intro", "elevator pitch")\n'
-    '  "question" : the question to ask the user, in natural spoken English (one sentence)\n'
-    '  "example"  : a model answer the user could give (2–4 short sentences, natural spoken English)\n\n'
-    "Avoid topics in the 'already_asked' list — pick something different. "
-    "Keep both question and example short enough to read aloud naturally. "
-    "Output JSON only, no markdown, no commentary."
-)
 
 _EVAL_SYS = (
-    "You are an English speaking coach for a Korean learner. The learner just attempted "
-    "to answer a meeting question in English. Give ONE short Korean sentence (max ~25 chars) "
-    "that helps them improve. Pick the most useful angle:\n"
-    " - praise a specific phrase that worked, OR\n"
-    " - suggest a better phrasing for something awkward, OR\n"
-    " - note a grammar/word issue, OR\n"
-    " - if they spoke Korean, gently say to try in English.\n"
-    "Output ONLY the Korean sentence. No quotes, no extra text."
+    "You are an English speaking coach for a Korean learner practicing for a meeting.\n"
+    "You have the question being practiced and the expected/ideal answer the learner is\n"
+    "working toward, plus the learner's actual attempt.\n"
+    "\n"
+    "Give ONE short English sentence (max ~18 words) of coaching feedback. Pick whatever\n"
+    "is most useful for this attempt:\n"
+    " - praise a specific phrase or content that matched well, OR\n"
+    " - point out a key piece from the expected answer the learner missed, OR\n"
+    " - suggest a more natural English phrasing, OR\n"
+    " - note a grammar or pronunciation issue, OR\n"
+    " - if the learner spoke Korean, gently remind them to try in English.\n"
+    "\n"
+    "Speak as a friendly coach (\"you said...\", \"try saying...\", \"nice — that's clear\").\n"
+    "Output ONLY that one English sentence. No quotes, no extra text, no preamble."
+)
+
+_LIVE_REACT_SYS = (
+    "You are a publisher BD in a real first meeting. The user just answered a question.\n"
+    "Respond IN CHARACTER with ONE short, warm English line (max ~12 words) that acknowledges\n"
+    "their answer naturally — e.g. 'Got it, thanks.' / 'That's helpful, thanks.' / 'Interesting.'\n"
+    "Do NOT ask a follow-up question. Do NOT give meta feedback. Just a brief, natural reaction.\n"
+    "Output ONLY that one English line."
 )
 
 
-async def make_question(client: AsyncOpenAI, model: str, scenario_prompt: str,
-                        asked_topics: list[str], extra: dict) -> dict:
-    """새 질문 + 예시 답변 생성. {'topic','question','example'} 반환.
-    실패 시 합리적 폴백."""
-    user_msg = (
-        f"Scenario prompt:\n---\n{scenario_prompt[:3500]}\n---\n\n"
-        f"already_asked: {asked_topics or '(none)'}\n\n"
-        "Return JSON now."
-    )
-    try:
-        r = await client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": _QUESTION_SYS},
-                {"role": "user", "content": user_msg},
-            ],
-            response_format={"type": "json_object"},
-            max_tokens=400,
-            temperature=0.8,
-            extra_body=extra,
-        )
-        content = r.choices[0].message.content or "{}"
-        data = json.loads(content)
-        # 필드 가드
-        q = (data.get("question") or "").strip()
-        e = (data.get("example") or "").strip()
-        t = (data.get("topic") or "").strip() or "general"
-        if not q or not e:
-            raise ValueError("missing field")
-        return {"topic": t, "question": q, "example": e}
-    except Exception as ex:
-        print(f"[coach] make_question fallback: {ex}")
-        return {
-            "topic": "general",
-            "question": "Could you tell me a bit about your team and your current project?",
-            "example": ("Sure — we're a two-person studio called Concode. I handle programming "
-                        "and business, my partner leads art. We're working on a narrative game "
-                        "called Graytail."),
-        }
+_LIVE_SYS = (
+    "Rewrite the given meeting question in natural spoken English, in the voice of\n"
+    "the persona described below. Keep the same meaning. Output ONE sentence only.\n"
+    "It should sound warm and conversational, like a publisher BD asking in a real\n"
+    "first meeting. No preamble, no quotes — just the rewritten question."
+)
 
 
-async def evaluate(client: AsyncOpenAI, model: str, question: str, attempt: str,
+async def evaluate(client: AsyncOpenAI, model: str,
+                   question: str, expected: str, attempt: str,
                    extra: dict) -> str:
     """사용자 시도에 대한 한국어 한 줄 코멘트."""
     if not attempt.strip():
-        return "음성이 잡히지 않았어요. 다시 한번 답해보세요."
+        return "I didn't catch that — try again, please."
     user_msg = (
         f"Question (English): {question}\n"
+        f"Expected/ideal answer: {expected}\n"
         f"Learner's attempt: {attempt}\n\n"
-        "Give one short Korean sentence of coaching feedback now."
+        "Give one short English coaching sentence now."
     )
     try:
         r = await client.chat.completions.create(
@@ -100,16 +68,73 @@ async def evaluate(client: AsyncOpenAI, model: str, question: str, attempt: str,
             extra_body=extra,
         )
         text = (r.choices[0].message.content or "").strip()
-        # 따옴표/마크다운 흔적 제거
         text = text.strip("'\"`").strip()
-        return text or "좋아요, 계속 연습해봐요."
+        return text or "Nice — keep practicing."
     except Exception as ex:
         print(f"[coach] evaluate fallback: {ex}")
-        return "좋아요, 계속 연습해봐요."
+        return "Nice — keep practicing."
 
 
+async def live_react(client: AsyncOpenAI, model: str, attempt: str, extra: dict) -> str:
+    """live 모드: 사용자 답에 짧게 영어로 반응 (캐릭터 유지). 다음 질문은 별도로."""
+    if not attempt.strip():
+        return "Sorry, I didn't catch that."
+    try:
+        r = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": _LIVE_REACT_SYS},
+                {"role": "user", "content": f"Learner said: {attempt}\nReact in one line."},
+            ],
+            max_tokens=40,
+            temperature=0.5,
+            extra_body=extra,
+        )
+        text = (r.choices[0].message.content or "").strip()
+        text = text.strip("'\"`").strip()
+        text = text.splitlines()[0].strip() if text else ""
+        return text or "Got it, thanks."
+    except Exception as ex:
+        print(f"[coach] live_react fallback: {ex}")
+        return "Got it, thanks."
+
+
+async def live_phrase(client: AsyncOpenAI, model: str,
+                      persona_prompt: str, question: str,
+                      extra: dict) -> str:
+    """live 모드: 데이터의 영어 질문을 페르소나 톤으로 wording 변형.
+    실패하거나 응답이 이상하면 원문을 그대로 돌려준다."""
+    persona_snippet = persona_prompt[:1500]   # 너무 길지 않게
+    user_msg = (
+        f"Persona:\n---\n{persona_snippet}\n---\n\n"
+        f"Original question: {question}\n\n"
+        "Rewrite as one natural spoken English sentence."
+    )
+    try:
+        r = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": _LIVE_SYS},
+                {"role": "user", "content": user_msg},
+            ],
+            max_tokens=120,
+            temperature=0.7,
+            extra_body=extra,
+        )
+        text = (r.choices[0].message.content or "").strip()
+        text = text.strip("'\"`").strip()
+        # 한 문장만 — 줄바꿈 들어오면 첫 줄만
+        text = text.splitlines()[0].strip() if text else ""
+        return text or question
+    except Exception as ex:
+        print(f"[coach] live_phrase fallback: {ex}")
+        return question
+
+
+# --- 고정 멘트 ---
 CHOICES_PROMPT = "다시 답해볼까요, 예시를 한 번 더 들어볼까요, 아니면 다음 질문으로 갈까요?"
 TRY_AGAIN_PROMPT = "좋아요, 다시 한번 답해보세요."
 EXAMPLE_PREFIX = "예시 답변:"
 TRY_PROMPT_KO = "한번 직접 답해보세요."
 STOP_PROMPT_KO = "이번 연습은 여기까지 할게요."
+ALL_DONE_PROMPT = "준비된 질문을 모두 다뤘어요. 멋졌어요. 연습을 마칠게요."

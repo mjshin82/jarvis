@@ -14,16 +14,28 @@
   - 본문 전체가 LLM 시스템 프롬프트(페르소나·규칙)에 들어감
 """
 import os
+import random
 from dataclasses import dataclass
 
 import config
+
+# Supertonic 의 사용 가능한 보이스 풀(M1~M5 / F1~F5). 시뮬 진입 시 평상시 음성을 제외하고
+# 이 풀에서 무작위 선택. 진입할 때마다 다른 음성으로 들리게 하는 게 목적.
+_ALL_VOICES = tuple(f"{g}{i}" for g in ("M", "F") for i in range(1, 6))
+
+
+def random_sim_voice(exclude: str | None = None) -> str:
+    """평상시 음성을 제외하고 무작위로 하나 선택. 다음 후보가 없으면 평상시 그대로."""
+    pool = [v for v in _ALL_VOICES if v != exclude]
+    return random.choice(pool) if pool else (exclude or "F1")
 
 _SCENARIO_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scenarios")
 
 PRACTICE_MODES = ("guided", "random", "live")
 
-# live 모드만 LLM 자유 진행이라 시스템 프롬프트 부록이 필요. guided/random 은 코드가
-# 상태머신으로 흐름을 통제하고, LLM 은 마이크로 작업(질문 생성·평가) 단위로만 호출.
+# 모든 모드의 흐름을 코드 상태머신이 통제한다. LLM 은 마이크로 작업(평가, live 의
+# wording 변형)만 한다. 따라서 시스템 프롬프트 부록은 더 이상 필요 없다.
+# 호환을 위해 정의는 남기되 비워둔다.
 _MODE_PROMPTS = {
     "guided": """
 
@@ -96,8 +108,8 @@ You are running a **full live simulation** of the meeting from greeting to wrap-
 
 
 def mode_instructions(mode: str) -> str:
-    """모드별 시스템 프롬프트 부록. live 만 의미 있음(guided/random 은 상태머신이 통제)."""
-    return _MODE_PROMPTS.get(mode, _MODE_PROMPTS["live"]) if mode == "live" else ""
+    """모드별 시스템 프롬프트 부록. 모든 모드를 상태머신이 통제하므로 빈 문자열."""
+    return ""
 
 
 # --- guided/random 상태머신 ---
@@ -111,6 +123,42 @@ _AGAIN = ("다시", "한 번 더", "한번더", "다시 한번", "다시 한 번
 _EXAMPLE = ("예시", "다시 들려", "다시들려", "example", "샘플")
 _NEXT = ("다음", "다음 질문", "다음으로", "next", "넥스트", "스킵", "skip", "pass")
 _STOP = ("그만", "끝내", "종료", "마칠", "stop", "quit", "end")
+
+
+# 모드 선택용 키워드 (모드 미지정 진입 시 사용자 다음 발화 분류).
+# Whisper 가 짧은 한국어 명령을 자주 헛들으니 음역 변형까지 별칭으로 포함.
+_MODE_KEYWORDS = {
+    "guided": (
+        "가이드", "guided", "guide", "예시", "답변 예시", "코칭", "코치", "코스",
+        "1번", "첫번째", "일번",
+        # 흔한 오인식: '가이드'의 첫 음 탈락/변형
+        "아이드", "아이딩", "아이들", "가이딩", "가이트", "카이드", "하이드",
+    ),
+    "random": (
+        "랜덤", "random", "랜덤하게", "무작위", "막", "2번", "두번째", "이번",
+        # 흔한 오인식
+        "랜듬", "렌덤", "랜점", "랜담",
+    ),
+    "live":   (
+        "실전", "live", "라이브", "그냥", "진짜", "실제", "롤플레이", "미팅처럼",
+        "3번", "세번째", "삼번",
+        # 흔한 오인식
+        "시전", "실선", "신전", "실전모드", "라이프",
+    ),
+}
+
+
+def classify_mode(text: str) -> str | None:
+    """사용자 발화에서 연습 모드를 분류. 못 잡으면 None."""
+    if not text:
+        return None
+    t = text.lower().strip()
+    # 가장 긴 키워드부터 보면 부분일치 충돌 줄어듦
+    for mode, kws in _MODE_KEYWORDS.items():
+        for kw in sorted(kws, key=len, reverse=True):
+            if kw in t:
+                return mode
+    return None
 
 
 def classify_choice(text: str) -> str | None:
@@ -181,16 +229,24 @@ def load_scenario(key: str) -> Scenario | None:
 
 class _Mode:
     """전역 모드 상태. 평상시(None)이거나 특정 Scenario+practice mode 활성.
-    guided/random 은 추가로 상태머신(state, current_question/example, asked_topics)을 유지."""
+    guided/random 은 추가로 상태머신(state, current_question/example, asked_topics)을 유지.
+    pending_scenario: 사용자가 시뮬 진입을 요청했지만 아직 모드를 안 골랐을 때 임시 보관."""
 
     def __init__(self):
         self.scenario: Scenario | None = None
         self.practice: str = "live"
-        # 상태머신 (guided/random 만 사용)
+        self.pending_scenario: str | None = None   # 모드 선택 대기 중인 시나리오 키
+        # 상태머신 (guided/random/live 공통: QA 뱅크에서 골라 진행)
         self.state: str = ST_ASKING
         self.current_question: str | None = None
         self.current_example: str | None = None
-        self.asked_topics: list[str] = []  # 같은 토픽 반복 방지용 누적
+        # QA 뱅크 진행 누적 (qa.key_of 가 만든 'sectionIdx:qIdx' 문자열들)
+        self.asked_keys: list[str] = []
+        # 시뮬 진입 시 평상시 음성 제외한 풀에서 무작위 선택, 진입 동안 유지
+        self.sim_voice: str | None = None
+
+    def is_pending_mode(self) -> bool:
+        return self.pending_scenario is not None and self.scenario is None
 
     def active(self) -> bool:
         return self.scenario is not None
@@ -201,42 +257,73 @@ class _Mode:
             return None
         self.scenario = sc
         self.practice = practice if practice in PRACTICE_MODES else "live"
+        self.pending_scenario = None
         self.state = ST_ASKING
         self.current_question = None
         self.current_example = None
-        self.asked_topics = []
+        self.asked_keys = []
+        # 진입할 때마다 메인 음성을 뺀 풀에서 새로 추첨 → 매번 다른 화자 느낌
+        self.sim_voice = random_sim_voice(exclude=config.SUPERTONIC_VOICE)
         return sc
 
     def end(self) -> Scenario | None:
         sc = self.scenario
         self.scenario = None
         self.practice = "live"
+        self.pending_scenario = None
         self.state = ST_ASKING
         self.current_question = None
         self.current_example = None
-        self.asked_topics = []
+        self.asked_keys = []
+        self.sim_voice = None
         return sc
 
+    def set_pending(self, key: str):
+        """모드 선택 대기 상태. 시나리오는 아직 활성화 안 함."""
+        self.scenario = None
+        self.pending_scenario = key
+
+    def clear_pending(self):
+        self.pending_scenario = None
+
     # --- 다른 모듈이 매 호출마다 참조 ---
+    def stt_initial_prompt(self) -> str | None:
+        """현재 상태에 특화된 STT 컨디셔닝. 좁고 집중된 힌트가 일반 워드북보다 강하게 작용.
+        None 을 돌려주면 stt.py 가 기본 워드북 프롬프트를 쓴다."""
+        # 모드 선택 대기 중: 셋 중 하나가 들어올 가능성이 압도적으로 높음
+        if self.is_pending_mode():
+            return "다음 중 하나를 한국어로 말한다: 가이드, 랜덤, 실전."
+        # guided 의 선택 대기: 4개 명령 중 하나
+        if self.scenario and self.practice == "guided" and self.state == ST_WAITING_CHOICE:
+            return "다음 중 하나를 한국어로 말한다: 다시, 예시, 다음, 그만."
+        return None
+
     def stt_lang(self) -> str:
-        # guided/random 은 사용자가 짧은 한국어로 다음 행동을 말할 수 있어야 함
-        # → 자동 감지(None) 가 안전. live 만 영어 고정.
+        """현재 상태에 맞는 STT 언어. 잘못 잡으면 영어 발화가 한국어로 음역되는 일이 생기므로
+        무조건 시나리오 언어로 고정하되, '선택 대기' 상태(다시/예시/다음 같은 한국어 명령
+        대기)일 때만 한국어로 고정."""
         if not self.scenario:
             return config.WHISPER_LANG
-        return self.scenario.lang if self.practice == "live" else None
+        # guided 에서 사용자가 선택을 말할 때는 한국어 고정
+        if self.practice == "guided" and self.state == ST_WAITING_CHOICE:
+            return "ko"
+        # 그 외(영어 시도, live 의 모든 응답)는 시나리오 언어(영어)
+        return self.scenario.lang
 
     def tts_lang(self) -> str:
-        # guided/random 은 한국어 피드백이 섞이므로 한국어로 두는 게 자연스럽다
-        # (Supertonic 은 영어 단어도 한국어 음성으로 읽어줌 — 자연스러움)
+        # 시뮬 모드는 어느 모드든 시나리오 언어(영어). guided/random 도 피드백을 영어로 주므로
+        # 일관된 영어 음성으로 가는 게 자연스럽다. 안내 멘트(한국어)는 Supertonic 이
+        # 영어 음성으로도 한국어를 그대로 발화 가능.
         if not self.scenario:
             return config.SUPERTONIC_LANG
-        return self.scenario.lang if self.practice == "live" else "ko"
+        return self.scenario.lang
 
     def tts_voice(self) -> str:
+        # 시뮬 모드에선 진입 시 추첨된 음성(평상시 음성 제외)을 진입 동안 유지.
+        # 종료하면 평상시 음성으로 복귀.
         if not self.scenario:
             return config.SUPERTONIC_VOICE
-        # live: 페르소나 음성(영어). guided/random: 평상시 음성(코치 톤).
-        return self.scenario.tts_voice if self.practice == "live" else config.SUPERTONIC_VOICE
+        return self.sim_voice or self.scenario.tts_voice
 
     def system_prompt(self) -> str | None:
         """시나리오 페르소나 + 모드별 진행 지침. 평상시 None."""
