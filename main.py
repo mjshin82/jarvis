@@ -256,9 +256,6 @@ async def main():
     # --- 회의 모드 (/meet) ---
     meeting_session = {"obj": None}
 
-    async def _meet_translate_async(text: str) -> str:
-        return await coach.translate_to_korean(llm.client, llm.model, text, llm.extra)
-
     async def start_meeting(language: str | None):
         """회의 모드 진입: 본체 마이크 일시정지 → RealtimeSTT 시작."""
         nonlocal response
@@ -276,7 +273,7 @@ async def main():
             sess = MeetingSession(
                 log=console.log,
                 set_status=console.set_status,
-                translate_async=_meet_translate_async,
+                llm=llm,
                 language=language or "",
             )
             await sess.start()

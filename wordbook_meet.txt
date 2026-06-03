@@ -1,0 +1,17 @@
+# 회의 모드(/meet) 전용 워드북.
+# 평상시 자비스 워드북(wordbook.txt) 과 독립적으로 관리.
+# 형식은 동일:
+#   정식 표기만:        Concode
+#   정식=오인식1,오인식2  자주 헛듣는 표현은 자동 교정
+#                          예) Graytail=그레이테일,그래이테일
+#
+# 회의 시작 시 RealtimeSTT 의 initial_prompt 로 주입되고,
+# 발화 끝난 텍스트에 대해 사후 alias 치환도 적용됩니다.
+
+# === 제품/스튜디오 ===
+Graytail=그레이테일,그래이테일,그레이트레일,Grarytail
+Concode=콩코드,컨코드,콘코드,콩코도
+
+# === 사람 ===
+신명진=신병준,신명전,신명준,Myungjin,Myeongjin,Shin Myungjin
+김선향=김선향씨,Sunhyang,Sunhyang Kim

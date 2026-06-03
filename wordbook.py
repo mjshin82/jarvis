@@ -1,31 +1,33 @@
 """워드북 — 고유명사/전문용어를 STT 와 LLM 양쪽에 주입.
 
-형식(wordbook.txt 한 줄에 하나):
+기본 파일은 평상시 자비스용 (wordbook.txt). 회의 모드 등 다른 컨텍스트에선
+경로를 인자로 넘겨 별도 파일을 사용할 수 있다 (예: wordbook_meet.txt).
+
+형식 (한 줄에 하나):
   Jarvis                    → 정식 표기만
   NVIDIA=엔비디아,너비디아   → 정식=오인식 표현들(쉼표 구분)
 
 쓰임:
-  - STT: load_initial_prompt() → faster-whisper 의 initial_prompt 로 전달.
-         "이 어휘가 나올 거다" 컨디셔닝. 음향적으로 비슷한 단어 가중치↑.
-  - STT 후처리: apply_aliases(text) → 오인식 표기를 정식 표기로 자동 치환.
-  - LLM: load_system_hint() → 시스템 프롬프트에 어휘 목록을 덧붙여,
-         STT 가 살짝 빗나가도 LLM 이 문맥상 알아챌 수 있게 한다.
+  - STT: load_initial_prompt(path) → faster-whisper 의 initial_prompt 로 전달.
+  - STT 후처리: apply_aliases(text, path) → 오인식 표기를 정식 표기로 자동 치환.
+  - LLM: load_system_hint(path) → 시스템 프롬프트에 어휘 힌트 덧붙임.
 """
 import os
 import re
 from functools import lru_cache
 
-_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "wordbook.txt")
+_DEFAULT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "wordbook.txt")
+MEET_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "wordbook_meet.txt")
 
 
-@lru_cache(maxsize=1)
-def _parse() -> tuple[list[str], dict[str, str]]:
-    """(canonical_terms, alias→canonical) 를 돌려준다. 파일이 없으면 빈 결과."""
+@lru_cache(maxsize=8)
+def _parse(path: str = _DEFAULT_PATH) -> tuple[tuple[str, ...], tuple[tuple[str, str], ...]]:
+    """(terms, aliases) 튜플로 반환 (lru_cache 위해 hashable). path 별로 따로 캐시."""
     terms: list[str] = []
     aliases: dict[str, str] = {}
-    if not os.path.exists(_PATH):
-        return terms, aliases
-    with open(_PATH, encoding="utf-8") as f:
+    if not os.path.exists(path):
+        return tuple(), tuple()
+    with open(path, encoding="utf-8") as f:
         for raw in f:
             line = raw.strip()
             if not line or line.startswith("#"):
@@ -42,16 +44,21 @@ def _parse() -> tuple[list[str], dict[str, str]]:
                         aliases[alt] = canon
             else:
                 terms.append(line)
-    return terms, aliases
+    return tuple(terms), tuple(aliases.items())
 
 
-def load_initial_prompt(max_chars: int = 240) -> str | None:
+def _data(path: str | None) -> tuple[list[str], dict[str, str]]:
+    """캐시된 튜플을 호출자가 쓰기 좋은 형태로."""
+    terms, alias_pairs = _parse(path or _DEFAULT_PATH)
+    return list(terms), dict(alias_pairs)
+
+
+def load_initial_prompt(max_chars: int = 240, path: str | None = None) -> str | None:
     """Whisper initial_prompt 용 어휘 문장. 너무 길면 환각이 늘어 제한.
     한국어 음역 별칭도 함께 넣어 발음 단서를 준다."""
-    terms, aliases = _parse()
+    terms, aliases = _data(path)
     if not terms and not aliases:
         return None
-    # 정식 + 별칭(중복 제거, 순서 보존)
     seen, words = set(), []
     for w in terms + list(aliases.keys()):
         if w not in seen:
@@ -62,19 +69,17 @@ def load_initial_prompt(max_chars: int = 240) -> str | None:
     return f"다음 어휘가 등장할 수 있다: {s}."
 
 
-def apply_aliases(text: str) -> str:
+def apply_aliases(text: str, path: str | None = None) -> str:
     """오인식 별칭을 정식 표기로 치환.
-    별칭 안의 공백은 "선택적 문장부호 + 공백" 으로 유연하게 매칭한다 — Whisper 가 짧은
-    명령 사이에 쉼표/마침표를 끼워넣는 경향(예: '마크, 고도.')을 흡수하기 위함."""
+    별칭 안의 공백은 "선택적 문장부호 + 공백" 으로 유연하게 매칭한다."""
     if not text:
         return text
-    _, aliases = _parse()
+    _, aliases = _data(path)
     if not aliases:
         return text
     # 긴 별칭부터 우선 매칭(부분일치 충돌 방지)
     for alt in sorted(aliases, key=len, reverse=True):
         canon = aliases[alt]
-        # 별칭을 토큰으로 쪼개서 사이에 문장부호+공백 변형을 허용하는 정규식 생성
         tokens = re.split(r"\s+", alt.strip())
         if not tokens:
             continue
@@ -83,9 +88,9 @@ def apply_aliases(text: str) -> str:
     return text
 
 
-def load_system_hint(max_terms: int = 40) -> str:
+def load_system_hint(max_terms: int = 40, path: str | None = None) -> str:
     """LLM 시스템 프롬프트에 덧붙일 어휘 힌트. 비어 있으면 ''."""
-    terms, aliases = _parse()
+    terms, aliases = _data(path)
     if not terms and not aliases:
         return ""
     seen, words = set(), []

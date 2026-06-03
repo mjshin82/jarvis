@@ -1,17 +1,25 @@
-"""회의 모드 — RealtimeSTT 로 실시간 자막을 받고, 발화 단위로 한국어 번역.
+"""회의 모드 — RealtimeSTT 로 실시간 자막을 받고, 발화 단위로 양방향 번역.
 
 평상시 STT(faster-whisper, sd 기반)와 별개. /meet 진입 시에만 활성화하고
 종료 시 깔끔히 shutdown. 메모리·CPU 부담이 큰 라이브러리라 회의 동안만 띄운다.
 
+양방향 자동 분기:
+  - 한국어 발화 → 영어로 번역 (내가 한 말을 상대에게)
+  - 그 외 발화  → 한국어로 번역 (상대가 한 말을 나에게)
+
 흐름:
-  시작 → RealtimeSTT 시작 → 부분 결과는 [자막] 한 줄로 흘러가게 표시
-                          → 발화 끝나면 확정 텍스트 + 한국어 번역 출력
+  시작 → RealtimeSTT 시작 (워드북 initial_prompt 주입)
+       → 부분 결과는 status 영역에 흘림
+       → 발화 끝나면 🧑 원문 + 🌐 번역 한 쌍 출력 (방향 자동 결정)
   종료 → RealtimeSTT shutdown
 """
 import asyncio
 import sys
 
 import pyaudio
+
+import coach
+import wordbook
 
 
 def _pick_physical_mic() -> int | None:
@@ -37,11 +45,12 @@ class MeetingSession:
     """RealtimeSTT 한 인스턴스를 들고 다닌다. 메인 이벤트 루프에서 콜백을
     안전하게 다루기 위해 asyncio.Queue 로 final 텍스트를 넘긴다."""
 
-    def __init__(self, *, log, set_status, translate_async, model: str = "small",
-                 realtime_model: str = "tiny", language: str = ""):
+    def __init__(self, *, log, set_status, llm,
+                 model: str = "small", realtime_model: str = "tiny",
+                 language: str = ""):
         self.log = log
         self.set_status = set_status
-        self.translate_async = translate_async   # async (text) -> ko
+        self.llm = llm                       # client/model/extra 보유한 LLM 인스턴스
         self.model = model
         self.realtime_model = realtime_model
         self.language = language
@@ -59,12 +68,18 @@ class MeetingSession:
         self._final_q = asyncio.Queue()
         mic_idx = _pick_physical_mic()
 
+        # 회의 전용 워드북(wordbook_meet.txt)을 양쪽 모델에 컨디셔닝으로 주입.
+        # 평상시 자비스 워드북과 분리해 회의에서만 쓰는 고유명사 모음.
+        wb_prompt = wordbook.load_initial_prompt(path=wordbook.MEET_PATH)
+
         self.recorder = AudioToTextRecorder(
             model=self.model,
             realtime_model_type=self.realtime_model,
             enable_realtime_transcription=True,
             on_realtime_transcription_update=self._on_partial,
             language=self.language,
+            initial_prompt=wb_prompt,
+            initial_prompt_realtime=wb_prompt,
             spinner=False,
             post_speech_silence_duration=0.7,
             silero_sensitivity=0.4,
@@ -142,7 +157,9 @@ class MeetingSession:
                 pass
 
     async def _consume_finals(self):
-        """확정 발화 처리 — 출력 + 번역. 메인 이벤트 루프에서 안전하게."""
+        """확정 발화 처리 — 출력 + 양방향 번역. 메인 이벤트 루프에서 안전하게.
+        가독성을 위해 두 번째 발화부터는 앞에 빈 줄 한 줄 추가."""
+        first = True
         while True:
             item = await self._final_q.get()
             if item is None:
@@ -150,21 +167,31 @@ class MeetingSession:
             text = item.strip()
             if not text:
                 continue
-            # status 비우고 한 줄로 확정 표시
+            text = wordbook.apply_aliases(text, path=wordbook.MEET_PATH)
             try:
                 self.set_status(None)
             except Exception:
                 pass
             self._partial_last = ""
+            if not first:
+                self.log("")   # 발화 묶음 사이 빈 줄
+            first = False
             self.log(f"🧑 {text}")
-            # 번역은 백그라운드 — 다음 발화 처리에 영향 X
             asyncio.create_task(self._translate_bg(text))
 
     async def _translate_bg(self, text: str):
+        """방향 자동 결정: 한글 있으면 영어로, 그 외엔 한국어로."""
         try:
-            ko = await self.translate_async(text)
+            if coach.is_korean(text):
+                out = await coach.translate_to_english(
+                    self.llm.client, self.llm.model, text, self.llm.extra)
+                prefix = "🇺🇸"
+            else:
+                out = await coach.translate_to_korean(
+                    self.llm.client, self.llm.model, text, self.llm.extra)
+                prefix = "🌐"
         except Exception as ex:
             self.log(f"[meet] translate error: {ex}")
             return
-        if ko:
-            self.log(f"🌐 {ko}")
+        if out:
+            self.log(f"{prefix} {out}")

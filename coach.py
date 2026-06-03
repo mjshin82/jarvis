@@ -131,7 +131,7 @@ async def live_phrase(client: AsyncOpenAI, model: str,
         return question
 
 
-_TRANSLATE_SYS = (
+_TO_KO_SYS = (
     "You are a translator. Translate the user's text into natural, conversational Korean.\n"
     "Rules:\n"
     " - Output ONLY the Korean translation. No explanations, no quotes, no source text.\n"
@@ -140,9 +140,17 @@ _TRANSLATE_SYS = (
     " - Preserve proper nouns; transliterate only when natural."
 )
 
+_TO_EN_SYS = (
+    "You are a translator. Translate the user's text into natural, conversational English.\n"
+    "Rules:\n"
+    " - Output ONLY the English translation. No explanations, no quotes, no source text.\n"
+    " - If the text is already in English, output it as-is.\n"
+    " - Use a natural, professional but warm tone — like in a real business meeting.\n"
+    " - Preserve proper nouns as-is."
+)
 
-async def translate_to_korean(client, model, text: str, extra: dict) -> str:
-    """한 줄 발화를 한국어로 옮긴다. 실패하면 원문 그대로."""
+
+async def _translate(client, model, text: str, system: str, extra: dict) -> str:
     text = text.strip()
     if not text:
         return ""
@@ -150,7 +158,7 @@ async def translate_to_korean(client, model, text: str, extra: dict) -> str:
         r = await client.chat.completions.create(
             model=model,
             messages=[
-                {"role": "system", "content": _TRANSLATE_SYS},
+                {"role": "system", "content": system},
                 {"role": "user", "content": text},
             ],
             max_tokens=400,
@@ -158,11 +166,27 @@ async def translate_to_korean(client, model, text: str, extra: dict) -> str:
             extra_body=extra,
         )
         out = (r.choices[0].message.content or "").strip()
-        # 따옴표/마크다운 제거
         return out.strip("'\"`").strip() or text
     except Exception as ex:
         print(f"[coach] translate fallback: {ex}")
         return text
+
+
+async def translate_to_korean(client, model, text: str, extra: dict) -> str:
+    """발화를 한국어로 옮긴다. 실패하면 원문 그대로."""
+    return await _translate(client, model, text, _TO_KO_SYS, extra)
+
+
+async def translate_to_english(client, model, text: str, extra: dict) -> str:
+    """발화를 영어로 옮긴다. 실패하면 원문 그대로."""
+    return await _translate(client, model, text, _TO_EN_SYS, extra)
+
+
+def is_korean(text: str) -> bool:
+    """한글 음절이 포함되어 있으면 한국어 발화로 본다."""
+    if not text:
+        return False
+    return any(0xAC00 <= ord(c) <= 0xD7A3 for c in text)
 
 
 # --- 고정 멘트 ---
