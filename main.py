@@ -204,15 +204,20 @@ async def main():
 
     def on_escape():
         """Esc 콜백 — 단계적 취소.
-          1) 큐에 대기 입력 있으면 → 큐만 비움 (진행 중 응답은 계속)
-          2) 큐 비고 응답 진행 중이면 → 응답 취소
-          3) 아무 것도 없으면 → 무동작
+          1) 회의 메타 입력 중이면 → 메타 입력 취소
+          2) 큐에 대기 입력 있으면 → 큐만 비움 (진행 중 응답은 계속)
+          3) 큐 비고 응답 진행 중이면 → 응답 취소
+          4) 아무 것도 없으면 → 무동작
         console 이벤트 루프 안에서 호출되므로 await 가 필요한 작업은 task 로."""
-        # 우선순위 1: 큐가 있으면 큐만 비움 (화면의 ⏳ 표시가 사라지는 것으로 충분)
+        # 우선순위 1: 회의 메타 입력 단계 취소
+        if in_meeting_setup():
+            cancel_meeting_setup()
+            return
+        # 우선순위 2: 큐가 있으면 큐만 비움
         if not text_queue.empty():
             _drain_text_queue()
             return
-        # 우선순위 2: 응답 진행 중이면 응답 취소
+        # 우선순위 3: 응답 진행 중이면 응답 취소
         if response is not None and not response.done():
             asyncio.create_task(_cancel_response_and_idle())
 
@@ -254,35 +259,83 @@ async def main():
         idle()
 
     # --- 회의 모드 (/meet) ---
-    meeting_session = {"obj": None}
+    # 두 단계: meeting_setup(메타 입력 대기) → meeting_session(실제 회의)
+    meeting_session: dict = {"obj": None}
+    meeting_setup: dict = {"obj": None}
 
-    async def start_meeting(language: str | None):
-        """회의 모드 진입: 본체 마이크 일시정지 → RealtimeSTT 시작."""
+    def in_meeting_setup() -> bool:
+        return meeting_setup["obj"] is not None
+
+    async def start_meeting_setup():
+        """/meet 진입 → 메타 입력 단계 시작. 첫 질문 출력."""
         nonlocal response
         if meeting_session["obj"] is not None:
             console.log("회의 모드가 이미 진행 중입니다.")
             return
-        # 진행 중 응답/큐 정리
+        if meeting_setup["obj"] is not None:
+            return
         await cancel(response); response = None
         player.flush()
         _drain_text_queue()
-        # 본체 마이크 양보
+        from live_translate import MeetingSetup
+        setup = MeetingSetup()
+        meeting_setup["obj"] = setup
+        console.log("🎤 회의 시작 전 정보를 입력해주세요. (Esc 로 취소)")
+        console.log(f"   {setup.prompt}")
+
+    def cancel_meeting_setup() -> bool:
+        """메타 입력 도중 취소(Esc). True 면 실제로 취소함."""
+        if meeting_setup["obj"] is None:
+            return False
+        meeting_setup["obj"] = None
+        console.log("🎤 회의 시작을 취소했어요.")
+        idle()
+        return True
+
+    async def handle_meeting_setup_input(line: str) -> None:
+        """메타 입력 단계 한 줄 처리. 다 채우면 실제 회의 시작."""
+        setup: "live_translate.MeetingSetup" = meeting_setup["obj"]
+        if setup is None:
+            return
+        # /bye 같은 명령은 그대로 통과시키지 말고 가벼운 안내. 단 /stop 으로는 취소 가능
+        stripped = line.strip()
+        if stripped.lower() in ("/stop", "/cancel", "취소"):
+            cancel_meeting_setup()
+            return
+        if not stripped:
+            console.log(f"   {setup.prompt}")
+            return
+        setup.submit(stripped)
+        if not setup.done:
+            console.log(f"   {setup.prompt}")
+            return
+        # 완료 → 실제 회의 시작
+        meta = setup.meta
+        meeting_setup["obj"] = None
+        await _begin_meeting(meta)
+
+    async def _begin_meeting(meta) -> None:
+        """메타가 모인 다음 호출. 본체 마이크 양보 + RealtimeSTT 시작."""
+        from live_translate import MeetingSession
         mic.pause()
         try:
-            from live_translate import MeetingSession
             sess = MeetingSession(
                 log=console.log,
                 set_status=console.set_status,
                 llm=llm,
-                language=language or "",
+                meta=meta,
             )
             await sess.start()
             meeting_session["obj"] = sess
+            console.log(f"🎤 회의를 시작합니다. 회의 번호: {meta.key}")
         except Exception as ex:
             mic.resume()
             console.log(f"회의 모드 시작 실패: {ex}")
 
     async def stop_meeting():
+        # 메타 입력 중이었으면 그것부터 취소
+        if cancel_meeting_setup():
+            return
         sess = meeting_session["obj"]
         if sess is None:
             console.log("회의 모드가 아닙니다.")
@@ -291,16 +344,16 @@ async def main():
             await sess.stop()
         finally:
             meeting_session["obj"] = None
-            mic.resume()   # 본체 마이크 재개
+            mic.resume()
             console.set_status(None)
             idle()
 
     cmd_ctx["trigger_wake"] = trigger_wake
     cmd_ctx["start_translate"] = start_translate
     cmd_ctx["stop_translate"] = stop_translate
-    cmd_ctx["start_meeting"] = start_meeting
+    cmd_ctx["start_meeting"] = start_meeting_setup    # 명령은 셋업부터
     cmd_ctx["stop_meeting"] = stop_meeting
-    cmd_ctx["in_meeting"] = lambda: meeting_session["obj"] is not None
+    cmd_ctx["in_meeting"] = lambda: meeting_session["obj"] is not None or meeting_setup["obj"] is not None
 
     async def audio_loop():
         """마이크 이벤트 소비."""
@@ -351,6 +404,10 @@ async def main():
             # 사실상 peek-and-pop). 큐가 비어있으면 다음 입력 들어올 때까지 대기.
             line = await text_queue.get()
             _refresh_queue_display()   # 빼냄 즉시 화면 갱신
+            # 회의 메타 입력 단계면 메타 라우터로 직행 (LLM 응답 흐름 X)
+            if in_meeting_setup():
+                await handle_meeting_setup_input(line)
+                continue
             if watchdog is not None:
                 await cancel(watchdog); watchdog = None
             state = "RESPONDING"

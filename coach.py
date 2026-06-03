@@ -189,6 +189,75 @@ def is_korean(text: str) -> bool:
     return any(0xAC00 <= ord(c) <= 0xD7A3 for c in text)
 
 
+# --- 회의 전용 번역 (DeepSeek 등 고품질 모델용) ---
+# 시스템 프롬프트는 매 호출마다 *정확히 동일* 하게 보내야 DeepSeek 의 자동
+# prompt caching 이 히트한다(같은 prefix 재사용 → 입력 토큰 1/10 가격).
+# 그래서 워드북/회의 맥락을 모두 한 번에 system 으로 묶는다.
+
+_MEET_SYS_TEMPLATE = """You are a professional simultaneous interpreter for a business meeting.
+
+Translate each input utterance into the target language. Output ONLY the translation — no labels, no quotes, no source text, no commentary.
+
+Direction (auto):
+- If the input contains any Korean characters → translate to natural, professional English.
+- Otherwise (English/Japanese/etc.) → translate to natural Korean (해요체).
+
+Quality rules:
+- Conversational and natural — what a fluent bilingual interpreter would actually say in a real meeting, NOT a literal word-for-word translation.
+- Preserve all proper nouns exactly as listed below. STT often mishears these — if the input has a near-miss, recognize and correct using this glossary.
+- Numbers, percentages, dates, units: keep them numeric when natural; spell out only when it reads better.
+- If the source sentence is fragmented or short, still produce a clean, fluent target sentence.
+- Never add information that isn't in the source. Never refuse — if you can't translate, output the source as-is.
+
+Meeting context:
+{context}
+
+Proper nouns glossary (recognize variants in input, output the canonical form):
+{glossary}
+
+Examples:
+입력: 만나서 반갑습니다. 저는 콩코드의 신명진입니다.
+출력: Nice to meet you. I'm Myungjin Shin from Concode.
+
+Input: Could you tell us about Graytail in one sentence?
+출력: 그레이테일을 한 문장으로 소개해 주시겠어요?
+
+Input: We're a two-person studio.
+출력: 저희는 2인 스튜디오예요."""
+
+
+def _build_meet_system_prompt(context: str, glossary_lines: list[str]) -> str:
+    """회의용 시스템 프롬프트. 캐시 히트를 위해 입력만 바뀌고 시스템은 고정."""
+    glossary = "\n".join(f"- {line}" for line in glossary_lines) if glossary_lines else "- (none)"
+    ctx = context.strip() if context else "(general business meeting)"
+    return _MEET_SYS_TEMPLATE.format(context=ctx, glossary=glossary)
+
+
+async def translate_meeting(client, model: str, text: str,
+                            system_prompt: str, extra: dict | None = None) -> str:
+    """회의 전용 양방향 번역. 시스템 프롬프트는 호출자가 만들어 매번 동일하게 보냄
+    (DeepSeek prompt caching 활용). 실패하면 원문 그대로."""
+    text = (text or "").strip()
+    if not text:
+        return ""
+    try:
+        r = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": text},
+            ],
+            max_tokens=500,
+            temperature=0.2,
+            extra_body=extra or {},
+        )
+        out = (r.choices[0].message.content or "").strip()
+        return out.strip("'\"`").strip() or text
+    except Exception as ex:
+        print(f"[coach] translate_meeting fallback: {ex}")
+        return text
+
+
 # --- 고정 멘트 ---
 CHOICES_PROMPT = "다시 답해볼까요, 예시를 한 번 더 들어볼까요, 아니면 다음 질문으로 갈까요?"
 TRY_AGAIN_PROMPT = "좋아요, 다시 한번 답해보세요."

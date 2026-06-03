@@ -87,6 +87,18 @@ SIM_OPENING_DEFAULT = os.getenv(
 )
 SIM_ENTER_FILLER = "네, 영어 시뮬레이션을 시작할게요."
 SIM_EXIT_FILLER = "시뮬레이션을 종료하고 평소 모드로 돌아갑니다."
+
+# --- 회의 모드 (/meet) ---
+# 번역 품질을 위해 LLM_BACKEND 와 무관하게 회의는 DeepSeek 같은 큰 모델을 쓴다.
+# 키가 없거나 비활성이면 자비스 본체 LLM(local) 으로 폴백.
+MEET_REMOTE_ENABLED = os.getenv("MEET_REMOTE_ENABLED", "true").lower() in ("1", "true", "yes")
+MEET_REMOTE_MODEL = os.getenv("MEET_REMOTE_MODEL", "deepseek-chat")
+MEET_CONTEXT = os.getenv("MEET_CONTEXT", (
+    "First introductory meeting between a Korean indie game studio (Concode) and a global "
+    "game publisher. Topics likely include the studio's team, prior title 'The Way Home', "
+    "current game 'Graytail', funding/publishing options, and future plans. "
+    "Tone: warm, professional, slightly formal."
+))
 SIM_MODE_ASK = (
     "어떤 방식으로 진행할까요? "
     "하나, 가이드 모드 — 질문과 답변 예시를 보고 따라 연습. "

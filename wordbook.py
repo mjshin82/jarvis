@@ -88,6 +88,25 @@ def apply_aliases(text: str, path: str | None = None) -> str:
     return text
 
 
+def load_glossary_lines(path: str | None = None) -> list[str]:
+    """LLM 시스템 프롬프트용 사전 라인 목록.
+    예: 'Concode (variants: 콩코드, 컨코드, 콘코드, 콩코도)'
+    번역기에 '이런 발음으로 들어오면 이 정식 표기로 옮겨라' 신호를 명확히 준다."""
+    terms, aliases = _data(path)
+    # canonical → 변형 목록 역색인
+    variants: dict[str, list[str]] = {t: [] for t in terms}
+    for alt, canon in aliases.items():
+        variants.setdefault(canon, []).append(alt)
+    lines = []
+    for canon in terms:
+        alts = variants.get(canon, [])
+        if alts:
+            lines.append(f"{canon} (variants: {', '.join(alts)})")
+        else:
+            lines.append(canon)
+    return lines
+
+
 def load_system_hint(max_terms: int = 40, path: str | None = None) -> str:
     """LLM 시스템 프롬프트에 덧붙일 어휘 힌트. 비어 있으면 ''."""
     terms, aliases = _data(path)
