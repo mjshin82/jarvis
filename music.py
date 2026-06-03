@@ -125,3 +125,8 @@ def _stop_sync() -> str:
 
 async def chrome_stop() -> str:
     return await asyncio.to_thread(_stop_sync)
+
+
+# 하위 호환 alias — 자비스 본체 llm.py / intents.py 가 옛 이름을 import.
+play_music = chrome_play
+stop_music = chrome_stop

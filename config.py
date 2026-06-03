@@ -81,18 +81,6 @@ SUPERTONIC_LANG = os.getenv("SUPERTONIC_LANG", "ko")     # 한국어 지원
 SUPERTONIC_SPEED = float(os.getenv("SUPERTONIC_SPEED", "1.05"))
 SUPERTONIC_STEPS = int(os.getenv("SUPERTONIC_STEPS", "8"))  # ↓줄이면 빠르고 품질↓
 
-# --- 시뮬레이션 모드 (영어 미팅 연습 등) ---
-SIM_ENABLED = os.getenv("SIM_ENABLED", "true").lower() in ("1", "true", "yes")
-SIM_LANG_DEFAULT = os.getenv("SIM_LANG_DEFAULT", "en")   # 시뮬 모드 STT/TTS 언어
-SIM_TTS_VOICE = os.getenv("SIM_TTS_VOICE", "M1")          # 시뮬 모드 음성(영어는 보통 M*)
-SIM_DEFAULT_SCENARIO = os.getenv("SIM_DEFAULT_SCENARIO", "publisher_first_meeting")
-SIM_OPENING_DEFAULT = os.getenv(
-    "SIM_OPENING_DEFAULT",
-    "Okay, switching to English. Let's begin the simulation."
-)
-SIM_ENTER_FILLER = "네, 영어 시뮬레이션을 시작할게요."
-SIM_EXIT_FILLER = "시뮬레이션을 종료하고 평소 모드로 돌아갑니다."
-
 # --- 회의 모드 (/meet) ---
 # 번역 품질을 위해 LLM_BACKEND 와 무관하게 회의는 DeepSeek 같은 큰 모델을 쓴다.
 # 키가 없거나 비활성이면 자비스 본체 LLM(local) 으로 폴백.
@@ -112,10 +100,3 @@ MEET_CONTEXT = os.getenv("MEET_CONTEXT", (
     "current game 'Graytail', funding/publishing options, and future plans. "
     "Tone: warm, professional, slightly formal."
 ))
-SIM_MODE_ASK = (
-    "어떤 방식으로 진행할까요? "
-    "하나, 가이드 모드 — 질문과 답변 예시를 보고 따라 연습. "
-    "둘, 랜덤 모드 — 무작위 질문을 빠르게 받아 답하기. "
-    "셋, 실전 모드 — 인사부터 마무리까지 진짜 미팅처럼."
-)
-SIM_MODE_RETRY = "가이드, 랜덤, 실전 중에서 골라주세요."

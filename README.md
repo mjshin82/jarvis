@@ -16,7 +16,7 @@
 - 호출어 **'Hey Jarvis'** + 텍스트 입력 둘 다 같은 LLM 파이프라인으로
 - STT(faster-whisper) · TTS(Supertonic) · Wake(openWakeWord) 모두 **Mac 로컬**
 - LLM 은 `mock` / `remote`(DeepSeek) / `local`(Ollama) 중 선택
-- **다양한 모드**: 평상시 비서 · 영어 미팅 연습(시뮬레이션) · 양방향 번역(/trans) · 회의 실시간 자막+양방향 번역(/meet, 외부 viewer 공유)
+- **다양한 모드**: 평상시 비서 · 양방향 번역(/trans) · 회의 실시간 자막+양방향 번역(/meet, 외부 viewer 공유)
 
 ## 파일 구조
 
@@ -35,9 +35,8 @@
 | `intents.py`  | 음악 명령 fast-path 분류기 (LLM 호출 0회로 즉시 실행) |
 | `main.py`     | 호출어 상태머신 + 텍스트 입력 큐 + 모드 라우팅 오케스트레이터 |
 | `wordbook.py` / `wordbook.txt` / `wordbook_meet.txt` | 고유명사 워드북(STT 컨디셔닝 + 사후치환 + LLM 힌트). 회의 전용 파일 분리 |
-| `simulation.py` / `scenarios/*.md` | 시뮬레이션 모드 매니저 + 시나리오 페르소나 |
-| `qa.py` / `scenarios/*.qa.md` | 시나리오 Q&A 뱅크 — 예상 질문·답변 쌍을 코드가 선택 |
-| `coach.py`    | 시뮬·번역·회의 모드의 LLM 마이크로 작업 (평가, 번역, 페르소나 wording) |
+| `simulation.py` | 모드 매니저 — 평상시/번역 모드 상태 보관 |
+| `coach.py`    | 번역/회의 모드의 LLM 헬퍼 (단방향 번역, 회의 양방향 + 캐시 친화 시스템 프롬프트) |
 | `live_translate.py` | 회의 모드(`/meet`) — RealtimeSTT + 양방향 번역 + listener fan-out |
 | `relay_client.py` | 회의 자막을 meeting-web 서버로 보내는 outbound WebSocket publisher |
 | `meeting-web/` | (서브프로젝트) Cloudflare Workers 자막 중계 서버 — 외부 viewer 공유 |
@@ -153,9 +152,6 @@ python main.py
 | `SUPERTONIC_LANG`   | `ko` | 평상시 합성 언어 |
 | `SUPERTONIC_SPEED`  | `1.05` | 말 속도 |
 | `SUPERTONIC_STEPS`  | `8` | 합성 스텝(↓ 빠르고 품질↓) |
-| `SIM_LANG_DEFAULT`  | `en` | 시뮬 모드 STT/TTS 언어 |
-| `SIM_TTS_VOICE`     | `M1` | live 모드 음성 |
-| `SIM_DEFAULT_SCENARIO` | `publisher_first_meeting` | 미지정 시 사용 |
 | `MEET_REMOTE_ENABLED` | `true` | 회의 번역에 DeepSeek 사용 (없으면 본체 LLM 폴백) |
 | `MEET_REMOTE_MODEL` | `deepseek-chat` | 회의 번역 모델 |
 | `MEET_CONTEXT`      | (텍스트) | 회의 시스템 프롬프트 컨텍스트 |
@@ -185,22 +181,6 @@ Graytail=그레이테일,그래이테일,Grarytail
 ```
 
 회의 모드는 `wordbook_meet.txt` 를 별도로 읽어 LLM 시스템 프롬프트(DeepSeek)에 glossary 형태(`Concode (variants: 콩코드, 컨코드, ...)`)로도 주입 — 번역 시 정식 표기로 통일.
-
-## 시뮬레이션 모드 (영어 미팅 연습)
-
-`scenarios/<key>.md` 페르소나 + `scenarios/<key>.qa.md` Q&A 뱅크로 **3가지 연습 모드**:
-
-| 모드 | 흐름 | 트리거 예시 |
-|------|------|------|
-| **guided** | 질문 + 영어 예시 답변 → 사용자 시도 → 한국어 코멘트 → "다시/예시/다음" 선택 | "답변 예시 보면서 연습" |
-| **random** | 무작위 질문 → 사용자 답 → 짧은 한국어 코멘트 → 자동 다음 | "랜덤으로 질문해줘" |
-| **live** | 인사~마무리 자유 대화, 영어 + 페르소나 유지 | "실전처럼 해보자", "롤플레이" |
-
-"영어 연습하자"처럼 모호하게 진입하면 **3가지 모드를 한국어로 안내**하고 다음 발화에서 모드를 정함. "그만"으로 깨끗하게 종료.
-
-Python 상태머신이 흐름을 통제하고 질문은 QA 뱅크에서 코드가 골라 그대로 출력. LLM 은 사용자 답에 대한 평가 / live 의 wording 변형 정도만 — 4B 로컬 모델에서도 시나리오 충실도 유지.
-
-**제어 트리거**: `다시 / 예시 / 다음 / 그만`
 
 ## 번역 모드 (`/trans`)
 
@@ -278,7 +258,6 @@ RELAY_TOKEN=devtoken
 - ✅ **슬래시 명령** + 명령 fast-path (음악)
 - ✅ **TTS 정규화** — 숫자/통화/단위/카운터/시간 한·영·일 자동 분기
 - ✅ **워드북** 3중 방어 (STT 컨디셔닝 + 사후치환 + LLM 힌트). 평상시/회의 워드북 분리
-- ✅ **시뮬레이션 모드** 3가지 (guided/random/live) + QA 뱅크
 - ✅ **번역 모드** (`/trans`) 양방향 자동 분기
 - ✅ **회의 모드** (`/meet`) — 실시간 자막 + DeepSeek 양방향 번역 + 외부 자막 중계
 
