@@ -253,9 +253,57 @@ async def main():
         console.log("🌐 번역 모드 종료.")
         idle()
 
+    # --- 회의 모드 (/meet) ---
+    meeting_session = {"obj": None}
+
+    async def _meet_translate_async(text: str) -> str:
+        return await coach.translate_to_korean(llm.client, llm.model, text, llm.extra)
+
+    async def start_meeting(language: str | None):
+        """회의 모드 진입: 본체 마이크 일시정지 → RealtimeSTT 시작."""
+        nonlocal response
+        if meeting_session["obj"] is not None:
+            console.log("회의 모드가 이미 진행 중입니다.")
+            return
+        # 진행 중 응답/큐 정리
+        await cancel(response); response = None
+        player.flush()
+        _drain_text_queue()
+        # 본체 마이크 양보
+        mic.pause()
+        try:
+            from live_translate import MeetingSession
+            sess = MeetingSession(
+                log=console.log,
+                set_status=console.set_status,
+                translate_async=_meet_translate_async,
+                language=language or "",
+            )
+            await sess.start()
+            meeting_session["obj"] = sess
+        except Exception as ex:
+            mic.resume()
+            console.log(f"회의 모드 시작 실패: {ex}")
+
+    async def stop_meeting():
+        sess = meeting_session["obj"]
+        if sess is None:
+            console.log("회의 모드가 아닙니다.")
+            return
+        try:
+            await sess.stop()
+        finally:
+            meeting_session["obj"] = None
+            mic.resume()   # 본체 마이크 재개
+            console.set_status(None)
+            idle()
+
     cmd_ctx["trigger_wake"] = trigger_wake
     cmd_ctx["start_translate"] = start_translate
     cmd_ctx["stop_translate"] = stop_translate
+    cmd_ctx["start_meeting"] = start_meeting
+    cmd_ctx["stop_meeting"] = stop_meeting
+    cmd_ctx["in_meeting"] = lambda: meeting_session["obj"] is not None
 
     async def audio_loop():
         """마이크 이벤트 소비."""

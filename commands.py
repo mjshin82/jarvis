@@ -116,8 +116,23 @@ async def _trans(args: str, ctx: dict):
     ctx["handled_state"] = True   # LISTENING 상태로 진입했으니 idle 막기
 
 
-@command("stop", help="번역 모드 등 현재 진행 모드를 종료")
+@command("meet", help="회의 모드 — 실시간 자막 + 한국어 번역", usage="[en|ja|...]")
+async def _meet(args: str, ctx: dict):
+    starter = ctx.get("start_meeting")
+    if starter is None:
+        ctx["log"]("이 환경에서는 회의 모드를 사용할 수 없습니다.")
+        return
+    lang = args.strip() or None
+    await starter(lang)
+    ctx["handled_state"] = True   # 본체 마이크는 pause 상태, idle 막기
+
+
+@command("stop", help="현재 진행 모드(번역/회의) 종료")
 async def _stop(args: str, ctx: dict):
+    # 회의 모드 우선
+    if ctx.get("in_meeting") and ctx["in_meeting"]():
+        await ctx["stop_meeting"]()
+        return
     stopper = ctx.get("stop_translate")
     if stopper is None:
         ctx["log"]("종료할 모드가 없습니다.")

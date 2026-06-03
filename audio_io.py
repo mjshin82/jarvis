@@ -15,8 +15,14 @@ from simulation import MODE
 
 
 class Microphone:
+    """마이크 입력 + VAD + wake.
+    pause()/resume() 으로 sd.InputStream 을 닫고 다시 열 수 있다 — 다른 STT 라이브러리
+    (예: RealtimeSTT) 가 마이크를 점유해야 하는 회의 모드 진입 시 사용."""
+
     def __init__(self):
         self._vad_model = load_silero_vad()
+        self._paused = False
+        self._stream = None     # 현재 활성 InputStream (events() 안에서 관리)
         # 모드별로 침묵 임계가 다르다 — 평상시는 빠른 응답, 번역은 긴 문장 묶음.
         # VADIterator 는 init 후 임계 변경이 안 되므로 두 개를 들고 발화 시작 직전에 고름.
         self._vad_default = VADIterator(
@@ -67,6 +73,35 @@ class Microphone:
             print(f"[audio] {status}")
         self._blocks.put(indata[:, 0].copy())
 
+    def pause(self) -> None:
+        """마이크 stream 을 닫는다 → 다른 라이브러리가 마이크를 점유 가능.
+        events() 루프는 큐에서 블록이 안 와 자연스럽게 멈춰 있다가 resume() 후 재개."""
+        self._paused = True
+        if self._stream is not None:
+            try:
+                self._stream.stop()
+                self._stream.close()
+            except Exception:
+                pass
+            self._stream = None
+
+    def resume(self) -> None:
+        """마이크 stream 을 다시 연다."""
+        if self._stream is not None:   # 이미 열림
+            self._paused = False
+            return
+        device = self._resolve_device()
+        self._stream = sd.InputStream(
+            samplerate=config.SAMPLE_RATE,
+            channels=config.CHANNELS,
+            blocksize=config.BLOCK_SIZE,
+            dtype="float32",
+            callback=self._callback,
+            device=device,
+        )
+        self._stream.start()
+        self._paused = False
+
     async def events(self, wake_detect=None, is_speaking=lambda: False):
         """async generator: 마이크에서 이벤트를 yield.
 
@@ -85,7 +120,7 @@ class Microphone:
         if device is not None:
             info = sd.query_devices(device)
             print(f"[audio] 입력 장치: [{device}] {info['name']}")
-        stream = sd.InputStream(
+        self._stream = sd.InputStream(
             samplerate=config.SAMPLE_RATE,
             channels=config.CHANNELS,
             blocksize=config.BLOCK_SIZE,
@@ -93,14 +128,30 @@ class Microphone:
             callback=self._callback,
             device=device,
         )
+        self._stream.start()
         # 발화 시작 *직전* 의 짧은 audio 도 잡아두면 첫 음절 잘림이 줄어든다.
-        # block 크기 = BLOCK_SIZE(512 = 32ms @ 16kHz). 6 블록 ≈ 200ms.
         pre_roll_max = 6
         pre_roll: list[np.ndarray] = []
-        with stream:
+        try:
             collecting = False
             buffer: list[np.ndarray] = []
             while True:
+                # 일시정지 중에는 큐에서 의미있는 블록이 안 들어옴.
+                # 잠깐씩 양보하면서 재개 신호 기다림.
+                if self._paused:
+                    await asyncio.sleep(0.1)
+                    # 잔여 블록 비움(재개 직후 옛 audio 사용 방지)
+                    while not self._blocks.empty():
+                        try:
+                            self._blocks.get_nowait()
+                        except queue.Empty:
+                            break
+                    collecting = False
+                    buffer = []
+                    pre_roll = []
+                    self._vad_default.reset_states()
+                    self._vad_translate.reset_states()
+                    continue
                 # 블로킹 큐를 executor 로 비동기 대기 (이벤트 루프 안 막음)
                 block = await loop.run_in_executor(None, self._blocks.get)
 
@@ -153,3 +204,11 @@ class Microphone:
                     self._vad.reset_states()
                     yield ("utterance", np.concatenate(buffer))
                     pre_roll = []   # 발화 종료 후 새로 채워나감
+        finally:
+            if self._stream is not None:
+                try:
+                    self._stream.stop()
+                    self._stream.close()
+                except Exception:
+                    pass
+                self._stream = None
