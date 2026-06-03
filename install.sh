@@ -246,14 +246,12 @@ cat <<EOM
        RELAY_URL / RELAY_TOKEN (회의 자막 외부 중계 사용 시)
 
   2. 실행:
-       source .venv/bin/activate
-       python main.py
+       ./run.sh                 # 자비스 본체 (venv 활성 + Ollama 확인 후 python main.py)
+       ./run.sh meeting-web     # 회의 자막 중계 dev 서버 (wrangler dev)
+       ./run.sh --no-ollama     # Ollama 자동 기동/대기 건너뜀
 
-  3. (선택) 회의 자막 중계 로컬 dev 서버:
-       cd meeting-web && npm run dev
-       # .env 에 RELAY_URL=ws://localhost:8787 / RELAY_TOKEN=devtoken
-
-  4. Ollama 서버: open -a Ollama   (LLM_BACKEND=local 사용 시)
+  3. (참고) 직접 실행하려면:
+       source .venv/bin/activate && python main.py
 EOM
 echo
 ok "${BOLD}완료${OFF}"
