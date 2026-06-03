@@ -98,3 +98,14 @@ async def _tts(args: str, ctx: dict):
     ctx["log"](f"🤖 {text}")
     wav, sr = await ctx["tts"].synth(text)
     await ctx["player"].enqueue(wav, sr)
+
+
+@command("mic", help="듣기 모드로 전환 ('Hey Jarvis' 호출과 동일)")
+async def _mic(args: str, ctx: dict):
+    trigger = ctx.get("trigger_wake")
+    if trigger is None:
+        ctx["log"]("이 환경에서는 마이크 트리거를 사용할 수 없습니다.")
+        return
+    await trigger()
+    # 명령이 직접 상태(LISTENING)를 잡았음을 알려 후속 idle 을 막는다.
+    ctx["handled_state"] = True

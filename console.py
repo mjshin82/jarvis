@@ -5,15 +5,19 @@
 확장된다.
 
 키 바인딩
-  Enter             제출
+  Enter             제출 (자동완성 메뉴 떠있으면 선택 항목 채우기)
   Option+Enter      줄바꿈 (멀티라인)
   Option+←/→        단어 단위 이동
   Option+Backspace  단어 단위 삭제
   Ctrl+A / Ctrl+E   줄 처음/끝
-  ↑ / ↓             멀티라인일 때 줄 이동, 단일 라인일 때 히스토리
-  Esc               입력 박스에 내용 있으면 비움, 비어있으면 진행 중 응답 취소
+  ↑ / ↓             메뉴 떠있으면 선택 이동, 멀티라인이면 줄 이동, 그 외 히스토리
+  Esc               메뉴 떠있으면 닫기 → 입력 박스 비움 → 진행 중 응답 취소
   Ctrl+C            입력 비우기 (빈 줄에서 한 번 더 누르면 종료)
   Ctrl+D            종료
+
+슬래시 명령
+  '/' 를 치면 입력 박스 아래에 사용 가능한 명령 메뉴가 뜬다. 방향키로
+  선택 후 Enter/Tab 으로 채우기. 명령줄은 밝은 블루로 표시.
 
 macOS 터미널 설정 팁
   iTerm2: Preferences → Profiles → Keys → "Natural Text Editing" 프리셋
@@ -26,15 +30,18 @@ from typing import AsyncIterator
 
 from prompt_toolkit import Application
 from prompt_toolkit.buffer import Buffer
+from prompt_toolkit.completion import Completer, Completion
+from prompt_toolkit.filters import Condition, has_completions
 from prompt_toolkit.formatted_text import ANSI
 from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import Layout
-from prompt_toolkit.layout.containers import HSplit, VSplit, Window, WindowAlign
+from prompt_toolkit.layout.containers import ConditionalContainer, HSplit, VSplit, Window, WindowAlign
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.processors import BeforeInput
 from prompt_toolkit.patch_stdout import patch_stdout
+from prompt_toolkit.styles import Style
 
 _queue: asyncio.Queue[str | None] | None = None
 _app: Application | None = None
@@ -110,16 +117,56 @@ def log(*args, sep: str = " ", end: str = "\n", flush: bool = False) -> None:
         sys.stdout.flush()
 
 
+class _SlashCompleter(Completer):
+    """입력이 '/' 로 시작할 때 commands._REGISTRY 항목을 후보로 제공."""
+
+    def get_completions(self, document, complete_event):
+        text = document.text_before_cursor
+        if not text.startswith("/"):
+            return
+        # '/' 뒤 첫 토큰만 검사. 공백이 있으면(인자 입력 중) 자동완성 안 띄움.
+        partial = text[1:]
+        if " " in partial or "\n" in partial:
+            return
+        # 지연 import: 순환 회피 + 테스트 시점 등록 가능
+        try:
+            from commands import _REGISTRY
+        except Exception:
+            return
+        for name in sorted(_REGISTRY):
+            if name.startswith(partial.lower()):
+                cmd = _REGISTRY[name]
+                # display: '/name    설명' 형태로 한 줄에
+                yield Completion(
+                    text=f"/{name}",
+                    start_position=-len(text),   # '/' 포함 기존 입력 전체 교체
+                    display=f"/{name}",
+                    display_meta=cmd.help,
+                )
+
+
 def _build_app() -> tuple[Application, Buffer]:
-    """입력 박스 + 위/아래 가로선 레이아웃의 Application 생성."""
+    """입력 박스 + 위/아래 가로선 + (조건부) 자동완성 메뉴."""
     history = InMemoryHistory()
-    buffer = Buffer(multiline=True, history=history)
+    buffer = Buffer(
+        multiline=True,
+        history=history,
+        completer=_SlashCompleter(),
+        complete_while_typing=True,
+    )
 
     kb = KeyBindings()
 
     @kb.add("enter")
     def _submit(event):
-        """Enter: 제출. 빈 줄이면 무시."""
+        """Enter: 자동완성 메뉴가 떠있으면 선택 항목으로 채우기, 아니면 제출."""
+        state = event.current_buffer.complete_state
+        if state and state.current_completion:
+            event.current_buffer.apply_completion(state.current_completion)
+            return
+        if state:
+            # 메뉴는 떠있는데 currrent_completion 이 없는 경우 → 메뉴 닫고 제출 단계로 폴백
+            event.current_buffer.cancel_completion()
         submitted = buffer.text.strip()
         if not submitted:
             buffer.text = ""
@@ -148,8 +195,11 @@ def _build_app() -> tuple[Application, Buffer]:
 
     @kb.add("escape", eager=True)
     def _escape(event):
-        """Esc: 진행 중 응답 취소(외부 콜백). 입력 박스에 내용이 있으면 그것부터 비움.
-        eager=True 로 등록해 Option+화살표 같은 다른 escape 시퀀스의 prefix 와 안 섞이게."""
+        """Esc: 메뉴가 떠있으면 닫기. 입력 박스에 내용 있으면 비우기.
+        그 외엔 외부 콜백(진행 중 응답 취소)."""
+        if event.current_buffer.complete_state:
+            event.current_buffer.cancel_completion()
+            return
         if buffer.text:
             buffer.text = ""
             return
@@ -159,7 +209,10 @@ def _build_app() -> tuple[Application, Buffer]:
             except Exception:
                 pass
 
-    # 입력 박스: 멀티라인이라 줄 수에 따라 1~10줄 사이에서 자동 조절
+    # 입력 박스. '/' 로 시작하면 명령처럼 보이게 밝은 블루로 표시.
+    def _input_style():
+        return "class:cmd-input" if buffer.text.startswith("/") else "class:input"
+
     input_window = Window(
         BufferControl(
             buffer=buffer,
@@ -169,6 +222,8 @@ def _build_app() -> tuple[Application, Buffer]:
         height=Dimension(min=1, max=10),
         wrap_lines=True,
         always_hide_cursor=False,
+        get_line_prefix=None,
+        style=_input_style,
     )
 
     # 위/아래 가로선 (전폭). char='─' 로 구분선 표시.
@@ -213,6 +268,55 @@ def _build_app() -> tuple[Application, Buffer]:
         dont_extend_height=True,
     )
 
+    # 자동완성 메뉴: 입력이 '/' 로 시작하고 후보가 있을 때만 보임.
+    # 박스 *하단 가로선 아래* 에 배치해 사용자가 요청한 시각 구조와 일치.
+    def _menu_text():
+        state = buffer.complete_state
+        if not state or not state.completions:
+            return ""
+        # 가장 긴 이름에 맞춰 정렬 표시. 최대 5개 보임(prompt_toolkit 이 스크롤 처리).
+        items = state.completions
+        cur = state.complete_index
+        name_w = max(len(c.display[0][1] if isinstance(c.display, list) else c.display) for c in items)
+        rows = []
+        # 보이는 윈도우: 현재 선택을 중심으로 최대 5개
+        max_visible = 5
+        n = len(items)
+        if n <= max_visible:
+            start = 0
+        else:
+            start = max(0, min(n - max_visible, (cur or 0) - max_visible // 2))
+        end = min(n, start + max_visible)
+        # ANSI 컬러: 선택된 항목만 강조(밝은 블루 배경 비슷한 효과로 ▸ 표시),
+        # 그 외는 평범한 밝은 블루 텍스트
+        BLUE = "\x1b[38;5;81m"      # 밝은 시안-블루 (Claude Code 풍)
+        SEL  = "\x1b[1;97;48;5;24m"  # 선택: 굵은 흰글씨 + 진한 블루 배경
+        RESET = "\x1b[0m"
+        for i in range(start, end):
+            c = items[i]
+            display = c.display[0][1] if isinstance(c.display, list) else c.display
+            meta = c.display_meta[0][1] if isinstance(c.display_meta, list) else (c.display_meta or "")
+            line = f"  {display:<{name_w}}  {meta}"
+            if i == cur:
+                rows.append(f"{SEL}{line}{RESET}")
+            else:
+                rows.append(f"{BLUE}{line}{RESET}")
+        # 위/아래에 더 있으면 표시
+        if start > 0:
+            rows.insert(0, f"{BLUE}  ↑ {start} more{RESET}")
+        if end < n:
+            rows.append(f"{BLUE}  ↓ {n - end} more{RESET}")
+        return ANSI("\n".join(rows))
+
+    menu_window = ConditionalContainer(
+        Window(
+            FormattedTextControl(_menu_text),
+            height=Dimension(min=0, max=7),
+            dont_extend_height=True,
+        ),
+        filter=has_completions,
+    )
+
     layout = Layout(
         HSplit([
             status_window,
@@ -220,13 +324,22 @@ def _build_app() -> tuple[Application, Buffer]:
             _hline(),
             VSplit([input_window]),
             _hline(),
+            menu_window,
         ]),
         focused_element=input_window,
     )
 
+    style = Style.from_dict({
+        "hline": "fg:#888888",
+        "queue": "fg:#aaaaaa",
+        "input": "",
+        "cmd-input": "fg:#5fd7ff bold",   # 명령줄: 밝은 블루 + 굵게
+    })
+
     app = Application(
         layout=layout,
         key_bindings=kb,
+        style=style,
         full_screen=False,           # 위 로그 영역은 일반 스크롤로 유지
         mouse_support=False,
         erase_when_done=False,
@@ -254,8 +367,8 @@ def start() -> None:
     _started = True
 
 
-def stop() -> None:
-    """종료 정리."""
+async def stop() -> None:
+    """종료 정리. Application 을 종료시키고 그 코루틴이 끝날 때까지 짧게 대기."""
     global _started
     if not _started:
         return
@@ -264,8 +377,16 @@ def stop() -> None:
             _app.exit()
         except Exception:
             pass
-    if _app_task and not _app_task.done():
-        _app_task.cancel()
+    if _app_task is not None:
+        # exit 후 정리가 끝날 시간을 짧게 준다(최대 1초)
+        try:
+            await asyncio.wait_for(_app_task, timeout=1.0)
+        except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
+            if not _app_task.done():
+                _app_task.cancel()
+    # 스피너 태스크도 정리
+    if _spinner_task is not None and not _spinner_task.done():
+        _spinner_task.cancel()
     _started = False
 
 

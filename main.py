@@ -49,7 +49,8 @@ async def main():
     text_queue: asyncio.Queue[str] = asyncio.Queue()   # 텍스트 입력 대기열
     exit_event = asyncio.Event()           # /bye 등 명시적 종료 요청
 
-    # 슬래시 명령 핸들러가 사용할 자원 컨텍스트 (commands.py 참고)
+    # 슬래시 명령 핸들러가 사용할 자원 컨텍스트 (commands.py 참고).
+    # trigger_wake 는 함수 정의 후 main() 본체에서 한 번 더 주입한다.
     cmd_ctx = {
         "log": console.log,
         "set_status": console.set_status,
@@ -126,14 +127,19 @@ async def main():
 
     async def respond_flow_text(text: str):
         """텍스트 입력 흐름. 슬래시(/) 로 시작하면 명령으로 디스패치, 아니면 LLM 응답.
-        둘 다 같은 큐잉/Esc 정책을 따른다 — text_worker 가 한 번에 하나씩만 실행."""
+        둘 다 같은 큐잉/Esc 정책을 따른다 — text_worker 가 한 번에 하나씩만 실행.
+
+        명령이 자체적으로 상태를 잡은 경우(예: /mic → LISTENING) 후처리 idle 을
+        건너뛴다. cmd_ctx['handled_state'] 가 True 이면 명령이 상태를 책임짐."""
+        cmd_ctx["handled_state"] = False
         if commands.is_command(text):
             await commands.dispatch(text, cmd_ctx)
         else:
             await speak_response(text)
         while player.is_speaking():
             await asyncio.sleep(0.1)
-        idle()
+        if not cmd_ctx.get("handled_state"):
+            idle()
 
     async def listen_timeout():
         try:
@@ -186,6 +192,17 @@ async def main():
         console.log("⏹  진행 중 응답을 멈췄어요.")
         idle()
 
+    async def trigger_wake():
+        """음성 'Hey Jarvis' 와 동일한 효과: 응답 중단 + 큐 비움 + 듣기 시작.
+        slash 명령(/mic) 에서도 그대로 재사용."""
+        nonlocal response
+        await cancel(response); response = None
+        player.flush()
+        _drain_text_queue()
+        await enter_listening(cue=True)
+
+    cmd_ctx["trigger_wake"] = trigger_wake
+
     async def audio_loop():
         """마이크 이벤트 소비."""
         nonlocal state, response, watchdog
@@ -193,11 +210,7 @@ async def main():
             wake_detect=wake.detect, is_speaking=player.is_speaking
         ):
             if kind == "wake":
-                # 음성 wake 는 즉시 barge-in: 응답 중단 + 텍스트 큐 비우고 듣기 시작
-                await cancel(response); response = None
-                player.flush()
-                _drain_text_queue()
-                await enter_listening(cue=True)
+                await trigger_wake()
             elif kind == "start":
                 if state == "LISTENING":
                     await cancel(watchdog); watchdog = None
@@ -260,6 +273,8 @@ async def main():
             if exc:
                 raise exc
     finally:
+        # console 을 먼저 멈춰야 collector 가 await 중인 prompt_async 가 풀린다.
+        await console.stop()
         await cancel(audio_task)
         await cancel(collector_task)
         await cancel(worker_task)
@@ -267,7 +282,6 @@ async def main():
         await cancel(response)
         await cancel(watchdog)
         player_task.cancel()
-        console.stop()
 
 
 if __name__ == "__main__":
