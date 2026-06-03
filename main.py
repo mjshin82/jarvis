@@ -332,7 +332,7 @@ async def main():
             await sess.start()
             meeting_session["obj"] = sess
             console.log(f"🎤 회의를 시작합니다. 회의 번호: {meta.key}")
-            # 외부 중계 활성 (옵션)
+            # 외부 중계 활성 (옵션) — 자막 페이지 URL 을 박스로 강조 표시
             if config.RELAY_URL and config.RELAY_TOKEN:
                 from relay_client import RelayClient
                 relay = RelayClient(
@@ -346,7 +346,15 @@ async def main():
                     sess._relay = relay   # stop() 에서 close
                     # http 보기 URL 안내 (ws → http 로 단순 치환)
                     view_base = config.RELAY_URL.replace("wss://", "https://").replace("ws://", "http://")
-                    console.log(f"🌐 중계 활성: {view_base}/m/{meta.key}")
+                    view_url = f"{view_base}/m/{meta.key}"
+                    box_width = max(len(view_url) + 4, 60)
+                    border = "─" * box_width
+                    console.log("")
+                    console.log(f"┌{border}┐")
+                    console.log(f"│  🌐 자막 페이지 (이 URL 을 참석자에게 공유)".ljust(box_width + 1) + "│")
+                    console.log(f"│  {view_url}".ljust(box_width + 1) + "│")
+                    console.log(f"└{border}┘")
+                    console.log("")
                 else:
                     console.log("🌐 중계 서버 연결 실패 — 콘솔만으로 진행합니다.")
         except Exception as ex:
