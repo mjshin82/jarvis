@@ -21,5 +21,11 @@ models/
 # OS
 .DS_Store
 
-# 컴파일된 Swift 데몬 (소스 audiod.swift 만 커밋)
-/audiod
+# 런타임 로그
+*.log
+
+# meeting-web (Node)
+meeting-web/node_modules/
+meeting-web/.dev.vars
+meeting-web/.wrangler/
+meeting-web/dist/

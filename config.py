@@ -8,10 +8,12 @@ load_dotenv()
 SAMPLE_RATE = 16_000      # Moonshine / silero-vad 둘 다 16kHz 모노 기준
 CHANNELS = 1
 BLOCK_SIZE = 512          # silero-vad 권장 프레임 크기(16kHz에서 32ms)
+MIC_DEVICE = os.getenv("MIC_DEVICE", "")  # 입력 장치 이름/인덱스. 비우면 시스템 기본
 
 # --- VAD ---
 VAD_THRESHOLD = 0.5       # 평상시 음성 확률 임계값
-SILENCE_MS = 700          # 이만큼 조용하면 "발화 끝"으로 간주
+SILENCE_MS = 1200         # 이만큼 조용하면 "발화 끝"으로 간주 (잠깐 숨 쉬어도 한 문장으로 묶이게 살짝 길게)
+SILENCE_MS_TRANSLATE = 2000   # 번역 모드: 더 관대하게 → 긴 문장 한 번에 묶임
 
 # --- Wake word ('Hey Jarvis') ---
 # 호출어 대기 → 호출 시에만 입력을 받는 구조. 상태머신이 에코 루프도 함께 막는다
@@ -78,3 +80,42 @@ SUPERTONIC_VOICE = os.getenv("SUPERTONIC_VOICE", "F1")   # M1~M5 / F1~F5
 SUPERTONIC_LANG = os.getenv("SUPERTONIC_LANG", "ko")     # 한국어 지원
 SUPERTONIC_SPEED = float(os.getenv("SUPERTONIC_SPEED", "1.05"))
 SUPERTONIC_STEPS = int(os.getenv("SUPERTONIC_STEPS", "8"))  # ↓줄이면 빠르고 품질↓
+
+# --- 시뮬레이션 모드 (영어 미팅 연습 등) ---
+SIM_ENABLED = os.getenv("SIM_ENABLED", "true").lower() in ("1", "true", "yes")
+SIM_LANG_DEFAULT = os.getenv("SIM_LANG_DEFAULT", "en")   # 시뮬 모드 STT/TTS 언어
+SIM_TTS_VOICE = os.getenv("SIM_TTS_VOICE", "M1")          # 시뮬 모드 음성(영어는 보통 M*)
+SIM_DEFAULT_SCENARIO = os.getenv("SIM_DEFAULT_SCENARIO", "publisher_first_meeting")
+SIM_OPENING_DEFAULT = os.getenv(
+    "SIM_OPENING_DEFAULT",
+    "Okay, switching to English. Let's begin the simulation."
+)
+SIM_ENTER_FILLER = "네, 영어 시뮬레이션을 시작할게요."
+SIM_EXIT_FILLER = "시뮬레이션을 종료하고 평소 모드로 돌아갑니다."
+
+# --- 회의 모드 (/meet) ---
+# 번역 품질을 위해 LLM_BACKEND 와 무관하게 회의는 DeepSeek 같은 큰 모델을 쓴다.
+# 키가 없거나 비활성이면 자비스 본체 LLM(local) 으로 폴백.
+MEET_REMOTE_ENABLED = os.getenv("MEET_REMOTE_ENABLED", "true").lower() in ("1", "true", "yes")
+MEET_REMOTE_MODEL = os.getenv("MEET_REMOTE_MODEL", "deepseek-chat")
+# 회의 자막 중계 (meeting-web). 둘 다 비어있으면 비활성 — 콘솔 출력만.
+RELAY_URL = os.getenv("RELAY_URL", "")            # ws://localhost:8787 또는 wss://...workers.dev
+RELAY_TOKEN = os.getenv("RELAY_TOKEN", "")        # meeting-web 의 RELAY_TOKEN 과 일치해야 함
+RELAY_TIMEOUT_S = float(os.getenv("RELAY_TIMEOUT_S", "5"))
+
+# 사용자(나) 이름 — /meet 메타 입력 시 매번 묻지 않고 .env 에서 가져온다.
+USER_NAME = os.getenv("USER_NAME", "Concode")
+
+MEET_CONTEXT = os.getenv("MEET_CONTEXT", (
+    "First introductory meeting between a Korean indie game studio (Concode) and a global "
+    "game publisher. Topics likely include the studio's team, prior title 'The Way Home', "
+    "current game 'Graytail', funding/publishing options, and future plans. "
+    "Tone: warm, professional, slightly formal."
+))
+SIM_MODE_ASK = (
+    "어떤 방식으로 진행할까요? "
+    "하나, 가이드 모드 — 질문과 답변 예시를 보고 따라 연습. "
+    "둘, 랜덤 모드 — 무작위 질문을 빠르게 받아 답하기. "
+    "셋, 실전 모드 — 인사부터 마무리까지 진짜 미팅처럼."
+)
+SIM_MODE_RETRY = "가이드, 랜덤, 실전 중에서 골라주세요."

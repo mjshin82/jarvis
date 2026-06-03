@@ -1,0 +1,25 @@
+name = "meeting-web-jarvis"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+
+# *.workers.dev 도메인 활성화 (커스텀 도메인 없을 때 외부 노출용)
+workers_dev = true
+
+# HTML 을 텍스트 모듈로 import (src/index.ts 의 `import MEETING_HTML from "./static/meeting.html"`)
+[[rules]]
+type = "Text"
+globs = ["**/*.html"]
+fallthrough = true
+
+# Durable Object: 회의 키별 1개 인스턴스
+[[durable_objects.bindings]]
+name = "MEETING_DO"
+class_name = "MeetingDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["MeetingDO"]   # 무료 플랜은 SQLite-backed DO 만 가능
+
+# 시크릿: RELAY_TOKEN
+# 로컬 dev: .dev.vars 파일에 RELAY_TOKEN=... 작성
+# 배포: wrangler secret put RELAY_TOKEN

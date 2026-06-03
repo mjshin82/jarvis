@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Meeting Live Captions</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff;
+    --fg: #111418;
+    --muted: #6b7280;
+    --card: #f5f6f8;
+    --border: #e5e7eb;
+    --accent: #2563eb;
+    --ko: #0a7e0a;
+    --en: #b04300;
+    --partial: #9aa0a6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e1116;
+      --fg: #e8eaed;
+      --muted: #9aa0a6;
+      --card: #161a21;
+      --border: #2a2f37;
+      --accent: #60a5fa;
+      --ko: #7ee787;
+      --en: #ffb86b;
+      --partial: #6b7280;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg);
+    font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
+      "Noto Sans KR", Arial, sans-serif; }
+  body { min-height: 100vh; display: flex; flex-direction: column; }
+  header {
+    position: sticky; top: 0; z-index: 10;
+    padding: 12px 16px; border-bottom: 1px solid var(--border);
+    background: var(--bg);
+    display: flex; align-items: center; gap: 12px;
+  }
+  header .title { font-size: 18px; font-weight: 600; }
+  header .badge { font-size: 12px; color: var(--muted); margin-left: auto; }
+  header .conn { font-size: 12px; }
+  header .conn.ok { color: var(--ko); }
+  header .conn.bad { color: #d33; }
+  main {
+    flex: 1; padding: 16px;
+    max-width: 980px; margin: 0 auto; width: 100%;
+  }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 12px 14px; margin: 10px 0;
+  }
+  /* 조합 중(미확정) 카드: 점선 테두리 + 흐릿한 색으로 한눈에 구분 */
+  .card.draft {
+    background: transparent;
+    border: 1px dashed var(--border);
+    color: var(--partial);
+  }
+  .card.draft .src { color: var(--partial); }
+  .src { font-size: 18px; }
+  .tx { font-size: 17px; margin-top: 6px; }
+  .tx.ko { color: var(--ko); }
+  .tx.en { color: var(--en); }
+  .info { color: var(--muted); font-size: 13px; }
+  .meta { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  /* 깜빡이는 점 — 진행 중이라는 신호 */
+  .draft .src::after {
+    content: "▍"; display: inline-block; margin-left: 4px;
+    animation: blink 1s steps(2, start) infinite;
+    opacity: 0.6;
+  }
+  @keyframes blink { to { visibility: hidden; } }
+  .lockbar {
+    position: fixed; bottom: 48px; left: 50%; transform: translateX(-50%);
+    background: var(--accent); color: white; padding: 6px 14px; border-radius: 999px;
+    font-size: 13px; cursor: pointer; opacity: 0; pointer-events: none; transition: opacity .2s;
+  }
+  .lockbar.show { opacity: 1; pointer-events: auto; }
+  @media (max-width: 600px) {
+    .src { font-size: 17px; } .tx { font-size: 16px; }
+  }
+</style>
+</head>
+<body>
+  <header>
+    <div class="title" id="title">🎤 회의 자막</div>
+    <div class="badge" id="meta-badge"></div>
+    <div class="conn" id="conn">···</div>
+  </header>
+  <main id="log"></main>
+  <div class="lockbar" id="lockbar">↓ 새 자막 보기</div>
+
+<script>
+(() => {
+  const key = location.pathname.replace(/^\/m\//, "");
+  const log = document.getElementById("log");
+  const titleEl = document.getElementById("title");
+  const metaBadge = document.getElementById("meta-badge");
+  const connEl = document.getElementById("conn");
+  const lockbar = document.getElementById("lockbar");
+
+  let lastCard = null;     // 직전 확정 카드(source 가 만든 것) — 번역 카드를 여기에 붙임
+  let draftCard = null;    // 현재 진행 중 partial 카드 (확정 source 오면 정식 카드로 전환)
+  let lockedToBottom = true;
+  let publisherConnected = false;
+
+  // 스크롤 잠금: 사용자가 위로 스크롤하면 자동 스크롤 OFF
+  window.addEventListener("scroll", () => {
+    const nearBottom = window.innerHeight + window.scrollY >= document.body.scrollHeight - 80;
+    lockedToBottom = nearBottom;
+    lockbar.classList.toggle("show", !nearBottom);
+  });
+  lockbar.addEventListener("click", () => {
+    lockedToBottom = true;
+    window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+    lockbar.classList.remove("show");
+  });
+  function scrollIfLocked() {
+    if (lockedToBottom) {
+      window.scrollTo({ top: document.body.scrollHeight });
+    }
+  }
+
+  function applyMeta(meta) {
+    if (!meta) return;
+    const partner = meta.partner || "?";
+    const user = meta.user || "?";
+    titleEl.textContent = `🎤 ${partner} ↔ ${user}`;
+    const tags = [];
+    if (meta.partner_lang) tags.push(`${partner}: ${meta.partner_lang}`);
+    if (meta.user_lang) tags.push(`${user}: ${meta.user_lang}`);
+    metaBadge.textContent = tags.join(" · ");
+  }
+
+  function newCard() {
+    const card = document.createElement("section");
+    card.className = "card";
+    log.appendChild(card);
+    return card;
+  }
+
+  function handle(ev) {
+    switch (ev.kind) {
+      case "hello":
+        applyMeta(ev.meta);
+        return;
+      case "info": {
+        const card = newCard();
+        card.innerHTML = `<div class="info">${escapeHtml(ev.text || "")}</div>`;
+        lastCard = null;
+        break;
+      }
+      case "source": {
+        // partial 로 만든 draft 가 있으면 그걸 확정 카드로 승격 — 카드 위치가 안 바뀜
+        let card;
+        if (draftCard) {
+          card = draftCard;
+          card.classList.remove("draft");
+          card.innerHTML = `<div class="src">🧑 ${escapeHtml(ev.text || "")}</div>`;
+          draftCard = null;
+        } else {
+          card = newCard();
+          card.innerHTML = `<div class="src">🧑 ${escapeHtml(ev.text || "")}</div>`;
+        }
+        lastCard = card;
+        break;
+      }
+      case "translation_ko":
+      case "translation_en": {
+        const cls = ev.kind === "translation_ko" ? "ko" : "en";
+        const sym = ev.kind === "translation_ko" ? "🌐" : "🇺🇸";
+        const html = `<div class="tx ${cls}">${sym} ${escapeHtml(ev.text || "")}</div>`;
+        if (lastCard) {
+          lastCard.insertAdjacentHTML("beforeend", html);
+        } else {
+          const card = newCard();
+          card.innerHTML = html;
+          lastCard = card;
+        }
+        break;
+      }
+      case "partial": {
+        // 진행 중 카드(draft) 를 본문에 인라인으로 표시/업데이트.
+        // source 가 오면 같은 카드가 확정 카드로 승격된다.
+        if (!draftCard) {
+          draftCard = newCard();
+          draftCard.classList.add("draft");
+        }
+        draftCard.innerHTML = `<div class="src">🧑 ${escapeHtml(ev.text || "")}</div>`;
+        scrollIfLocked();
+        return;
+      }
+      case "gap":
+        lastCard = null;
+        // draft 가 source 없이 끝나 남았다면(드뭄) 흔적 정리
+        if (draftCard) {
+          draftCard.remove();
+          draftCard = null;
+        }
+        return;
+      case "end": {
+        const card = newCard();
+        card.innerHTML = `<div class="info">— 회의 종료 —</div>`;
+        publisherConnected = false;
+        connEl.textContent = "🛑 publisher ended";
+        connEl.className = "conn bad";
+        break;
+      }
+      case "kicked": {
+        const card = newCard();
+        card.innerHTML = `<div class="info">— 새 publisher 가 채널을 인수했습니다 —</div>`;
+        break;
+      }
+      case "publisher_disconnected": {
+        publisherConnected = false;
+        connEl.textContent = "⏸ publisher 연결 끊김";
+        connEl.className = "conn bad";
+        return;
+      }
+      default:
+        return;
+    }
+    scrollIfLocked();
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+    }[c]));
+  }
+
+  let ws = null;
+  let reconnectDelay = 500;
+
+  function connect() {
+    const proto = location.protocol === "https:" ? "wss:" : "ws:";
+    ws = new WebSocket(`${proto}//${location.host}/subscribe/${encodeURIComponent(key)}`);
+    connEl.textContent = "연결 중…";
+    connEl.className = "conn";
+
+    ws.addEventListener("open", () => {
+      publisherConnected = true;
+      connEl.textContent = "● live";
+      connEl.className = "conn ok";
+      reconnectDelay = 500;
+    });
+    ws.addEventListener("message", (m) => {
+      try {
+        const ev = JSON.parse(m.data);
+        handle(ev);
+      } catch (e) {
+        console.error("bad message", e, m.data);
+      }
+    });
+    ws.addEventListener("close", () => {
+      connEl.textContent = `재연결 중 (${reconnectDelay/1000}s)…`;
+      connEl.className = "conn bad";
+      setTimeout(connect, reconnectDelay);
+      reconnectDelay = Math.min(reconnectDelay * 2, 8000);
+    });
+    ws.addEventListener("error", () => {
+      try { ws.close(); } catch {}
+    });
+  }
+
+  if (!key) {
+    titleEl.textContent = "회의 키가 URL 에 없습니다.";
+  } else {
+    connect();
+  }
+})();
+</script>
+</body>
+</html>

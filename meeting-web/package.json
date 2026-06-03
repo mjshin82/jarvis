@@ -1,0 +1,20 @@
+{
+  "name": "meeting-web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Jarvis 회의 모드 자막 중계 — Cloudflare Workers + Durable Objects",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "hono": "^4.6.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240924.0",
+    "typescript": "^5.6.0",
+    "wrangler": "^4.97.0"
+  }
+}
