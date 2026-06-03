@@ -49,18 +49,36 @@
 
 ```bash
 cd jarvis
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env   # DEEPSEEK_API_KEY 등 채우기
+./install.sh                  # 한 번에 (Homebrew/venv/pip/모델). meeting-web 은 제외
+./install.sh --no-models      # 모델 사전 다운로드 건너뜀 (첫 실행 시 자동)
+./install.sh --web            # meeting-web (Node) 까지 설치
 ```
 
-> 모델(faster-whisper, Supertonic, openWakeWord)은 **첫 실행 시 HuggingFace에서 자동 다운로드**되어 캐시됩니다.
+수동으로 하고 싶다면:
 
-> Ollama 사용 시: `brew install --cask ollama-app` → `open -a Ollama` → `ollama pull qwen3:4b-instruct`
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env          # DEEPSEEK_API_KEY 등 채우기
+# brew install portaudio                       # RealtimeSTT 빌드용
+# brew install --cask ollama-app               # local LLM 사용 시
+# ollama pull qwen3:4b-instruct                # Ollama 모델
+```
+
+> 모델(faster-whisper, Supertonic, openWakeWord)은 첫 실행 시 HuggingFace에서 자동 다운로드되어 캐시됩니다.
 
 ## 실행
 
 ```bash
+./run.sh                 # 자비스 본체 (venv 활성 + Ollama 확인 후 python main.py)
+./run.sh meeting-web     # 회의 자막 중계 dev 서버 (wrangler dev, localhost:8787)
+./run.sh --no-ollama     # Ollama 자동 기동/대기 건너뜀 (mock/remote 모드에서 유용)
+```
+
+수동으로 하고 싶다면:
+
+```bash
+source .venv/bin/activate
 python main.py
 ```
 
