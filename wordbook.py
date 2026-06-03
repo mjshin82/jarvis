@@ -63,7 +63,9 @@ def load_initial_prompt(max_chars: int = 240) -> str | None:
 
 
 def apply_aliases(text: str) -> str:
-    """오인식 별칭을 정식 표기로 치환. 단어 경계 기준(한글 포함)."""
+    """오인식 별칭을 정식 표기로 치환.
+    별칭 안의 공백은 "선택적 문장부호 + 공백" 으로 유연하게 매칭한다 — Whisper 가 짧은
+    명령 사이에 쉼표/마침표를 끼워넣는 경향(예: '마크, 고도.')을 흡수하기 위함."""
     if not text:
         return text
     _, aliases = _parse()
@@ -72,8 +74,12 @@ def apply_aliases(text: str) -> str:
     # 긴 별칭부터 우선 매칭(부분일치 충돌 방지)
     for alt in sorted(aliases, key=len, reverse=True):
         canon = aliases[alt]
-        # \b 는 한글에서 잘 안 통하므로 단순 치환 + 대소문자 무시
-        text = re.sub(re.escape(alt), canon, text, flags=re.IGNORECASE)
+        # 별칭을 토큰으로 쪼개서 사이에 문장부호+공백 변형을 허용하는 정규식 생성
+        tokens = re.split(r"\s+", alt.strip())
+        if not tokens:
+            continue
+        pattern = r"[,\.\?!\s]*".join(re.escape(tok) for tok in tokens)
+        text = re.sub(pattern, canon, text, flags=re.IGNORECASE)
     return text
 
 
