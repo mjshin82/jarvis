@@ -14,11 +14,14 @@ from datetime import datetime
 from openai import AsyncOpenAI
 
 import config
+import wordbook
 from search import web_search
 from music import play_music, stop_music
 
 # 문장 끝으로 볼 부호 (한국어/영어).
 _SENTENCE_END = re.compile(r"[.!?。…？！]\s*$|[\n]")
+# Qwen3 등의 추론 블록. /no_think 로도 안 막힐 때 후처리로 제거.
+_THINK_BLOCK = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 _WEEKDAYS = ["월", "화", "수", "목", "금", "토", "일"]
 
 _TOOL_WEB_SEARCH = {
@@ -93,7 +96,7 @@ class LLM:
 
         # 사용 가능한 도구 구성 (클라이언트 있을 때만)
         self.tools = []
-        base = config.SYSTEM_PROMPT
+        base = config.SYSTEM_PROMPT + wordbook.load_system_hint()
         if self.client is not None:
             if config.SEARCH_ENABLED:
                 self.tools.append(_TOOL_WEB_SEARCH)
@@ -148,8 +151,10 @@ class LLM:
             print(f"[llm] 예열 생략: {e}")
 
     async def _stream_answer(self, messages):
-        """messages 로 스트리밍 호출하며 문장 단위 yield. 끝나면 history 에 assistant 기록."""
+        """messages 로 스트리밍 호출하며 문장 단위 yield. 끝나면 history 에 assistant 기록.
+        Qwen3 등이 흘리는 <think>...</think> 블록은 통째로 버퍼에 모았다가 닫힐 때 제거."""
         full, buf = "", ""
+        in_think = False           # <think> 가 열려있는 중인지
         try:
             stream = await self.client.chat.completions.create(
                 model=self.model, messages=messages, stream=True, extra_body=self.extra,
@@ -159,16 +164,45 @@ class LLM:
                 if not delta:
                     continue
                 buf += delta
-                full += delta
+                # think 블록 처리: 열림/닫힘 사이의 토큰은 yield 하지 않는다
+                while True:
+                    if in_think:
+                        end = buf.lower().find("</think>")
+                        if end < 0:
+                            buf = ""           # 닫힐 때까지 통째로 폐기
+                            break
+                        buf = buf[end + len("</think>"):]
+                        in_think = False
+                    else:
+                        start = buf.lower().find("<think>")
+                        if start < 0:
+                            break
+                        # think 이전 텍스트는 살리고 그 뒤부터는 폐기 모드로
+                        kept = buf[:start]
+                        buf = buf[start + len("<think>"):]
+                        full += kept
+                        in_think = True
+                        # kept 안에 문장 종결이 있으면 즉시 yield
+                        if kept and _SENTENCE_END.search(kept):
+                            s = kept.strip()
+                            if s:
+                                yield s
+                            kept = ""
+                if in_think:
+                    continue
+                # 일반 경로: 문장 종결 보이면 잘라서 yield
                 if _SENTENCE_END.search(buf):
                     s = buf.strip()
+                    full += buf
                     buf = ""
                     if s:
                         yield s
             if buf.strip():
+                full += buf
                 yield buf.strip()
         finally:
-            self.history.append({"role": "assistant", "content": full.strip() or "(중단됨)"})
+            cleaned = _THINK_BLOCK.sub("", full).strip()
+            self.history.append({"role": "assistant", "content": cleaned or "(중단됨)"})
 
     async def respond(self, user_text: str):
         """async generator: 완성된 문장을 하나씩 yield."""
@@ -195,7 +229,7 @@ class LLM:
 
         if not msg.tool_calls:
             # 도구 불필요 → 받은 답을 문장 단위로
-            content = (msg.content or "").strip()
+            content = _THINK_BLOCK.sub("", msg.content or "").strip()
             self.history.append({"role": "assistant", "content": content or "(무응답)"})
             for s in _split_sentences(content):
                 yield s

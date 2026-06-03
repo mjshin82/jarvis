@@ -10,6 +10,7 @@ import numpy as np
 from faster_whisper import WhisperModel
 
 import config
+import wordbook
 
 _MIN_SAMPLES = 1600    # 0.1s @ 16kHz — 그보다 짧으면 무의미
 _MIN_RMS = 0.01        # 이보다 조용하면 무음으로 보고 STT 생략
@@ -23,10 +24,13 @@ class STT:
             compute_type=config.WHISPER_COMPUTE,
         )
         self.lang = config.WHISPER_LANG
+        self.initial_prompt = wordbook.load_initial_prompt()  # 어휘 컨디셔닝
         print(
             f"[stt] faster-whisper {config.WHISPER_MODEL} "
             f"({config.WHISPER_DEVICE}/{config.WHISPER_COMPUTE}), lang={self.lang}"
         )
+        if self.initial_prompt:
+            print(f"[stt] 워드북 적용: {self.initial_prompt[:80]}…")
 
     def _transcribe_sync(self, audio: np.ndarray) -> str:
         audio = np.ascontiguousarray(audio.squeeze(), dtype=np.float32)
@@ -39,8 +43,10 @@ class STT:
             language=self.lang,
             beam_size=1,         # 그리디 → 저지연
             vad_filter=True,     # 비음성 구간 제거(환각 방지)
+            initial_prompt=self.initial_prompt,   # 워드북 어휘 컨디셔닝
         )
-        return "".join(seg.text for seg in segments).strip()
+        text = "".join(seg.text for seg in segments).strip()
+        return wordbook.apply_aliases(text)   # 자주 틀리는 표기는 정식 표기로
 
     async def transcribe(self, audio: np.ndarray) -> str:
         return await asyncio.to_thread(self._transcribe_sync, audio)
