@@ -26,6 +26,7 @@ import console
 import commands
 import coach
 from audio_io import Microphone
+from audio_backend import make_backend
 from stt import STT
 from llm import LLM
 from tts import TTS
@@ -39,7 +40,9 @@ async def main():
     stt = STT()
     llm = LLM()
     tts = TTS()
-    player = Player()
+    backend = make_backend()
+    await backend.start()
+    player = Player(backend)
     wake = WakeWord()
 
     await llm.warmup()
@@ -459,6 +462,10 @@ async def main():
         await cancel(response)
         await cancel(watchdog)
         player_task.cancel()
+        try:
+            await backend.close()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
