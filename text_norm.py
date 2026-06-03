@@ -120,10 +120,28 @@ _UNIT_SAY = {
 }
 
 
+def _detect_lang(text: str, fallback: str) -> str:
+    """문장의 우세 언어를 자동 감지. 한글/일본어가 거의 없으면 영어로 본다.
+    모드 언어와 실제 응답 언어가 어긋날 때 단위/숫자가 잘못 풀리는 걸 막기 위함."""
+    has_hangul = any(0xAC00 <= ord(c) <= 0xD7A3 for c in text)
+    has_kana = any(0x3040 <= ord(c) <= 0x30FF for c in text)
+    if has_hangul:
+        return "ko"
+    if has_kana:
+        return "ja"
+    # 한글/가나 없이 라틴 문자가 있으면 영어로 본다 (숫자만 있는 경우는 fallback)
+    has_latin = any("A" <= c <= "Z" or "a" <= c <= "z" for c in text)
+    if has_latin:
+        return "en"
+    return fallback
+
+
 def normalize(text: str, lang: str = "ko") -> str:
-    """TTS 직전 텍스트 정규화. 숫자/단위/기호를 발화 가능한 형태로 바꾼다."""
+    """TTS 직전 텍스트 정규화. 숫자/단위/기호를 발화 가능한 형태로 바꾼다.
+    lang 은 힌트일 뿐 — 문장 내용을 보고 실제 언어를 추정해서 적용한다."""
     if not text:
         return text
+    lang = _detect_lang(text, fallback=lang)
     t = text
 
     # 1) 시간: 10:30 → 열 시 삼십 분 (한국어 한정. 다른 언어는 그대로)
