@@ -48,20 +48,19 @@ def _safe(name: str, max_len: int = 30) -> str:
     return (s or "unknown")[:max_len]
 
 
-# 메타 입력 단계 (순서대로)
+# 메타 입력 단계 — 사용자에게 *반드시* 물어야 할 것만 남긴다.
+# my_name 은 config.USER_NAME 에서 기본값, partner/my 의 언어는 LLM 이 자동 분기.
 _META_STEPS = (
     ("partner_name", "상대방 이름을 입력해주세요."),
-    ("partner_lang", "상대방 사용 언어를 입력해주세요. (예: English, Japanese)"),
-    ("my_name",      "내 이름을 입력해주세요."),
-    ("my_lang",      "내 언어를 입력해주세요. (예: Korean)"),
 )
 
 
 class MeetingSetup:
-    """메타 입력 진행 상태. /meet 입력 직후 텍스트 큐가 이 객체로 라우팅됨."""
+    """메타 입력 진행 상태. /meet 입력 직후 텍스트 큐가 이 객체로 라우팅됨.
+    my_name 은 config.USER_NAME 으로 자동 채움 — 사용자 입력 단계는 1단계뿐."""
 
-    def __init__(self):
-        self.meta = MeetingMeta()
+    def __init__(self, default_my_name: str = "Concode"):
+        self.meta = MeetingMeta(my_name=default_my_name)
         self.step_index = 0
 
     @property
@@ -244,16 +243,21 @@ class MeetingSession:
     # --- 내부 ---
 
     def _on_partial(self, text: str):
-        """RealtimeSTT 스레드에서 호출. 같은 줄에 덮어쓰기는 prompt_toolkit 과
-        잘 안 맞으므로 의미 단위로만 출력(긴 변화가 있을 때)."""
+        """RealtimeSTT 스레드에서 호출. 콘솔 status + listener fan-out 모두 수행.
+        prompt_toolkit 호출/asyncio.create_task 는 메인 루프 스레드에서만 안전 →
+        call_soon_threadsafe 로 위탁."""
         text = (text or "").strip()
         if not text or text == self._partial_last:
             return
         self._partial_last = text
-        # 너무 자주 찍히지 않게: 텍스트가 충분히 더 길어졌을 때만
-        # (큐 영역에 표시하는 게 깔끔하지만 일단은 status 영역에 흘림)
         try:
-            # 메인 루프에 set_status 위탁
+            # 메인 루프에 통합 emit 위탁 ('partial' 은 _emit 안에서 콘솔 출력 X,
+            # listener 로만 흘러감 — RelayClient → meeting-web viewer 의 📝 영역)
+            self._loop.call_soon_threadsafe(self._emit, "partial", text)
+        except Exception:
+            pass
+        # 콘솔 status 도 같이 갱신 (자비스 콘솔 입력 박스 위 스피너 영역)
+        try:
             self._loop.call_soon_threadsafe(self.set_status, f"📝 {text[:80]}")
         except Exception:
             pass

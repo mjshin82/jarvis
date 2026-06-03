@@ -278,9 +278,9 @@ async def main():
         player.flush()
         _drain_text_queue()
         from live_translate import MeetingSetup
-        setup = MeetingSetup()
+        setup = MeetingSetup(default_my_name=config.USER_NAME)
         meeting_setup["obj"] = setup
-        console.log("🎤 회의 시작 전 정보를 입력해주세요. (Esc 로 취소)")
+        console.log(f"🎤 회의 시작 전 정보를 입력해주세요. (내 이름: {config.USER_NAME}, Esc 로 취소)")
         console.log(f"   {setup.prompt}")
 
     def cancel_meeting_setup() -> bool:

@@ -98,6 +98,9 @@ RELAY_URL = os.getenv("RELAY_URL", "")            # ws://localhost:8787 또는 w
 RELAY_TOKEN = os.getenv("RELAY_TOKEN", "")        # meeting-web 의 RELAY_TOKEN 과 일치해야 함
 RELAY_TIMEOUT_S = float(os.getenv("RELAY_TIMEOUT_S", "5"))
 
+# 사용자(나) 이름 — /meet 메타 입력 시 매번 묻지 않고 .env 에서 가져온다.
+USER_NAME = os.getenv("USER_NAME", "Concode")
+
 MEET_CONTEXT = os.getenv("MEET_CONTEXT", (
     "First introductory meeting between a Korean indie game studio (Concode) and a global "
     "game publisher. Topics likely include the studio's team, prior title 'The Way Home', "
