@@ -11,19 +11,33 @@ import sounddevice as sd
 from silero_vad import load_silero_vad, VADIterator
 
 import config
+from simulation import MODE
 
 
 class Microphone:
     def __init__(self):
         self._vad_model = load_silero_vad()
-        # VADIterator: 프레임을 하나씩 먹이면 발화 시작/끝 이벤트를 돌려준다
-        self._vad = VADIterator(
+        # 모드별로 침묵 임계가 다르다 — 평상시는 빠른 응답, 번역은 긴 문장 묶음.
+        # VADIterator 는 init 후 임계 변경이 안 되므로 두 개를 들고 발화 시작 직전에 고름.
+        self._vad_default = VADIterator(
             self._vad_model,
             threshold=config.VAD_THRESHOLD,
             sampling_rate=config.SAMPLE_RATE,
             min_silence_duration_ms=config.SILENCE_MS,
         )
+        self._vad_translate = VADIterator(
+            self._vad_model,
+            threshold=config.VAD_THRESHOLD,
+            sampling_rate=config.SAMPLE_RATE,
+            min_silence_duration_ms=config.SILENCE_MS_TRANSLATE,
+        )
+        self._vad = self._vad_default
         self._blocks: queue.Queue = queue.Queue()
+
+    def _pick_vad(self):
+        """현재 모드에 맞는 VAD 인스턴스를 돌려준다.
+        호출 시점에 결정 — 발화 진행 중에는 바꾸지 않는다(컨텍스트 깨짐)."""
+        return self._vad_translate if MODE.is_translate() else self._vad_default
 
     def _resolve_device(self):
         """MIC_DEVICE 환경변수 우선. 비었으면 입력 채널 있는 첫 번째 물리 마이크 자동 선택
@@ -79,6 +93,10 @@ class Microphone:
             callback=self._callback,
             device=device,
         )
+        # 발화 시작 *직전* 의 짧은 audio 도 잡아두면 첫 음절 잘림이 줄어든다.
+        # block 크기 = BLOCK_SIZE(512 = 32ms @ 16kHz). 6 블록 ≈ 200ms.
+        pre_roll_max = 6
+        pre_roll: list[np.ndarray] = []
         with stream:
             collecting = False
             buffer: list[np.ndarray] = []
@@ -92,7 +110,9 @@ class Microphone:
                     # → 호출어가 명령 캡처로 새어들어가는 것을 방지
                     collecting = False
                     buffer = []
-                    self._vad.reset_states()
+                    pre_roll = []
+                    self._vad_default.reset_states()
+                    self._vad_translate.reset_states()
                     while not self._blocks.empty():
                         try:
                             self._blocks.get_nowait()
@@ -106,17 +126,30 @@ class Microphone:
                     if collecting:
                         collecting = False
                         buffer = []
-                    self._vad.reset_states()
+                    pre_roll = []
+                    self._vad_default.reset_states()
+                    self._vad_translate.reset_states()
                     continue
+
+                # 발화 진행 중이 아니라면 모드에 맞는 VAD 를 매번 골라준다
+                if not collecting:
+                    self._vad = self._pick_vad()
 
                 event = self._vad(block)  # {'start':...} / {'end':...} / None
                 if event and "start" in event:
                     collecting = True
-                    buffer = []
+                    # pre_roll 을 버퍼 시작에 끼워 첫 음절 잘림 완화
+                    buffer = list(pre_roll)
                     yield ("start", None)
                 if collecting:
                     buffer.append(block)
+                else:
+                    # 항상 최근 audio 를 짧게 유지(다음 발화의 pre_roll 용)
+                    pre_roll.append(block)
+                    if len(pre_roll) > pre_roll_max:
+                        pre_roll.pop(0)
                 if event and "end" in event and collecting:
                     collecting = False
                     self._vad.reset_states()
                     yield ("utterance", np.concatenate(buffer))
+                    pre_roll = []   # 발화 종료 후 새로 채워나감
