@@ -161,23 +161,20 @@ def normalize(text: str, lang: str = "ko") -> str:
         return f"{n} {unit}"
     t = _JPY_RE.sub(_jpy_sub, t)
 
-    # 4a) 복합 단위 (km/h 등) — 일반 단위보다 먼저
+    # 4a) 복합 단위 (km/h 등) — 일반 단위보다 먼저.
+    # 영어 모드에선 단위 발음을 한글로 풀지 않고 원문 유지(TTS 가 알아서 읽음).
     def _unit_complex_sub(m):
         n_raw, unit = m.group(1), m.group(2)
-        n = _say_number(n_raw, lang) if lang == "ko" else _say_number(n_raw, lang)
-        return f"{n} {_UNIT_SAY.get(unit, unit)}"
+        n = _say_number(n_raw, lang)
+        unit_say = _UNIT_SAY.get(unit, unit) if lang == "ko" else unit
+        return f"{n} {unit_say}"
     t = _UNIT_COMPLEX_RE.sub(_unit_complex_sub, t)
 
-    # 4b) 단일 단위 (영문/한국어 혼합)
+    # 4b) 단일 단위
     def _unit_sub(m):
         n_raw, unit = m.group(1), m.group(2)
-        if lang == "ko":
-            # 시간/분/초/년 등 한국어 단위는 시각/카운터로 따로 처리되기도 함
-            # 일관성을 위해 한자어 발음 사용
-            n = _say_number(n_raw, "ko")
-        else:
-            n = _say_number(n_raw, lang)
-        unit_say = _UNIT_SAY.get(unit, unit)
+        n = _say_number(n_raw, lang)
+        unit_say = _UNIT_SAY.get(unit, unit) if lang == "ko" else unit
         return f"{n} {unit_say}"
     t = _UNIT_RE.sub(_unit_sub, t)
 
