@@ -60,11 +60,12 @@ async def dispatch(text: str, ctx: dict) -> None:
     """명령 실행. 모르는 명령이면 안내. 핸들러는 예외를 던지지 않게."""
     name, args = parse(text)
     if not name:
-        ctx["log"]("사용법: /<명령> [인자]. 도움말은 /help.")
+        ctx["log"]("사용법: /<명령> [인자]")
         return
     cmd = _REGISTRY.get(name)
     if cmd is None:
-        ctx["log"](f"알 수 없는 명령: /{name}. 도움말은 /help.")
+        avail = ", ".join(sorted(_REGISTRY))
+        ctx["log"](f"알 수 없는 명령: /{name}. 사용 가능: {avail}")
         return
     try:
         await cmd.handler(args, ctx)
@@ -73,15 +74,6 @@ async def dispatch(text: str, ctx: dict) -> None:
 
 
 # --- 기본 명령어 ---
-
-@command("help", help="사용 가능한 명령 목록")
-async def _help(args: str, ctx: dict):
-    log = ctx["log"]
-    log("사용 가능한 명령:")
-    for cmd in sorted(_REGISTRY.values(), key=lambda c: c.name):
-        usage = f" {cmd.usage}" if cmd.usage else ""
-        log(f"  /{cmd.name}{usage}  — {cmd.help}")
-
 
 @command("bye", help="프로그램 종료")
 async def _bye(args: str, ctx: dict):

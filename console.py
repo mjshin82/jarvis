@@ -224,6 +224,7 @@ def _build_app() -> tuple[Application, Buffer]:
         always_hide_cursor=False,
         get_line_prefix=None,
         style=_input_style,
+        dont_extend_height=True,   # 실제 줄 수에 맞춰 축소(빈 줄 안 만듦)
     )
 
     # 위/아래 가로선 (전폭). char='─' 로 구분선 표시.
@@ -313,6 +314,7 @@ def _build_app() -> tuple[Application, Buffer]:
             FormattedTextControl(_menu_text),
             height=Dimension(min=0, max=7),
             dont_extend_height=True,
+            wrap_lines=False,
         ),
         filter=has_completions,
     )
