@@ -16,6 +16,7 @@ from supertonic import TTS as SupertonicTTS
 
 import config
 from simulation import MODE
+from text_norm import normalize
 
 
 class TTS:
@@ -35,10 +36,14 @@ class TTS:
         return self._styles[voice]
 
     def _synth_sync(self, text: str) -> np.ndarray:
+        lang = MODE.tts_lang()
+        # 합성 직전 텍스트 정규화: 숫자/단위/기호를 발화 가능한 형태로 변환
+        # (Supertonic 의 G2P 가 약한 부분을 코드에서 보완 → 발음 안정성↑)
+        text = normalize(text, lang=lang)
         wav, _dur = self.engine.synthesize(
             text=text,
             voice_style=self._get_style(MODE.tts_voice()),
-            lang=MODE.tts_lang(),
+            lang=lang,
             speed=config.SUPERTONIC_SPEED,
             total_steps=config.SUPERTONIC_STEPS,
         )
