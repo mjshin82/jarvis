@@ -15,6 +15,7 @@ import numpy as np
 from supertonic import TTS as SupertonicTTS
 
 import config
+from simulation import MODE
 
 
 class TTS:
@@ -24,15 +25,20 @@ class TTS:
             model=config.SUPERTONIC_MODEL,
             auto_download=True,
         )
-        # 보이스 스타일은 한 번만 로드해 재사용
-        self.style = self.engine.get_voice_style(config.SUPERTONIC_VOICE)
+        # 보이스 스타일은 이름 단위로 캐시(시뮬 모드는 다른 음성을 쓸 수 있음)
+        self._styles: dict[str, object] = {}
         self.sample_rate = int(getattr(self.engine, "sample_rate", 44_100))
+
+    def _get_style(self, voice: str):
+        if voice not in self._styles:
+            self._styles[voice] = self.engine.get_voice_style(voice)
+        return self._styles[voice]
 
     def _synth_sync(self, text: str) -> np.ndarray:
         wav, _dur = self.engine.synthesize(
             text=text,
-            voice_style=self.style,
-            lang=config.SUPERTONIC_LANG,
+            voice_style=self._get_style(MODE.tts_voice()),
+            lang=MODE.tts_lang(),
             speed=config.SUPERTONIC_SPEED,
             total_steps=config.SUPERTONIC_STEPS,
         )

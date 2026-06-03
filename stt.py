@@ -11,6 +11,7 @@ from faster_whisper import WhisperModel
 
 import config
 import wordbook
+from simulation import MODE
 
 _MIN_SAMPLES = 1600    # 0.1s @ 16kHz — 그보다 짧으면 무의미
 _MIN_RMS = 0.01        # 이보다 조용하면 무음으로 보고 STT 생략
@@ -38,15 +39,20 @@ class STT:
             return ""
         if float(np.sqrt(np.mean(audio ** 2))) < _MIN_RMS:
             return ""
+        lang = MODE.stt_lang() or self.lang   # 시뮬 모드면 그 언어, 평상시면 기본
+        # 워드북은 한국어 컨텍스트 기준이라 다른 언어에선 끔(영어 발화 환각 방지)
+        prompt = self.initial_prompt if lang == "ko" else None
         segments, _info = self.model.transcribe(
             audio,
-            language=self.lang,
+            language=lang,
             beam_size=1,         # 그리디 → 저지연
             vad_filter=True,     # 비음성 구간 제거(환각 방지)
-            initial_prompt=self.initial_prompt,   # 워드북 어휘 컨디셔닝
+            initial_prompt=prompt,
         )
         text = "".join(seg.text for seg in segments).strip()
-        return wordbook.apply_aliases(text)   # 자주 틀리는 표기는 정식 표기로
+        if lang == "ko":
+            text = wordbook.apply_aliases(text)
+        return text
 
     async def transcribe(self, audio: np.ndarray) -> str:
         return await asyncio.to_thread(self._transcribe_sync, audio)

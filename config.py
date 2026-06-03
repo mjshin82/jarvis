@@ -74,3 +74,15 @@ SUPERTONIC_VOICE = os.getenv("SUPERTONIC_VOICE", "F1")   # M1~M5 / F1~F5
 SUPERTONIC_LANG = os.getenv("SUPERTONIC_LANG", "ko")     # 한국어 지원
 SUPERTONIC_SPEED = float(os.getenv("SUPERTONIC_SPEED", "1.05"))
 SUPERTONIC_STEPS = int(os.getenv("SUPERTONIC_STEPS", "8"))  # ↓줄이면 빠르고 품질↓
+
+# --- 시뮬레이션 모드 (영어 미팅 연습 등) ---
+SIM_ENABLED = os.getenv("SIM_ENABLED", "true").lower() in ("1", "true", "yes")
+SIM_LANG_DEFAULT = os.getenv("SIM_LANG_DEFAULT", "en")   # 시뮬 모드 STT/TTS 언어
+SIM_TTS_VOICE = os.getenv("SIM_TTS_VOICE", "M1")          # 시뮬 모드 음성(영어는 보통 M*)
+SIM_DEFAULT_SCENARIO = os.getenv("SIM_DEFAULT_SCENARIO", "publisher_first_meeting")
+SIM_OPENING_DEFAULT = os.getenv(
+    "SIM_OPENING_DEFAULT",
+    "Okay, switching to English. Let's begin the simulation."
+)
+SIM_ENTER_FILLER = "네, 영어 시뮬레이션을 시작할게요."
+SIM_EXIT_FILLER = "시뮬레이션을 종료하고 평소 모드로 돌아갑니다."
