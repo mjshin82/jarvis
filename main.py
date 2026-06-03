@@ -24,12 +24,14 @@ import asyncio
 import config
 import console
 import commands
+import coach
 from audio_io import Microphone
 from stt import STT
 from llm import LLM
 from tts import TTS
 from player import Player
 from wake import WakeWord
+from simulation import MODE
 
 
 async def main():
@@ -74,13 +76,15 @@ async def main():
                 pass
 
     async def enter_listening(cue=True):
-        """듣기 상태로 진입: (선택) wake.wav 큐 → LISTENING → 무발화 타임아웃 감시."""
+        """듣기 상태로 진입: (선택) wake.wav 큐 → LISTENING → 무발화 타임아웃 감시.
+        번역 모드는 끝없이 듣기를 반복하므로 안내 한 줄을 매번 찍지 않는다(노이즈)."""
         nonlocal state, watchdog
         await cancel(watchdog)
         if cue:
             await player.enqueue_file(config.FX_WAKE)
         state = "LISTENING"
-        console.log("🔔 듣고 있어요…")
+        if not MODE.is_translate():
+            console.log("🔔 듣고 있어요…")
         watchdog = asyncio.create_task(listen_timeout())
 
     async def speak_response(text: str):
@@ -106,8 +110,33 @@ async def main():
             # 응답이 비어있었던 경우(드뭄): 빈 🤖 줄로 표시는 생략
             pass
 
+    async def _translate_bg(audio):
+        """번역 모드 전용 백그라운드 파이프라인: STT → 번역 → 표시.
+        respond_flow_audio 가 즉시 다음 듣기로 복귀할 수 있도록 fire-and-forget.
+        결과 순서는 끝나는 순서대로(짧은 발화가 먼저 보일 수 있음)."""
+        try:
+            text = await stt.transcribe(audio)
+        except Exception as e:
+            console.log(f"[stt] {e}")
+            return
+        if not text:
+            return
+        console.log(f"🧑 {text}")
+        ko = await coach.translate_to_korean(llm.client, llm.model, text, llm.extra)
+        if ko:
+            console.log(f"🌐 {ko}")
+
     async def respond_flow_audio(audio):
-        """음성 입력 흐름: ok.wav → STT → 공통 응답 → (연속대화면) 다시 듣기."""
+        """음성 입력 흐름.
+        - 평상시: ok.wav → STT → LLM 응답 → TTS → 다시 듣기 (직렬)
+        - 번역 모드: 효과음 X + STT/번역까지 통째로 백그라운드, 즉시 다시 듣기.
+          → 연속 발화 중간에 마이크가 안 끊기고 효과음 되먹임도 없다."""
+        if MODE.is_translate():
+            # 효과음 X (말 위에 노이즈 안 끼게), STT+번역 통째로 백그라운드 위탁
+            asyncio.create_task(_translate_bg(audio))
+            await enter_listening(cue=False)
+            return
+
         await player.enqueue_file(config.FX_OK)
         console.set_status("받아쓰는 중…")
         try:
@@ -145,6 +174,9 @@ async def main():
         try:
             await asyncio.sleep(config.LISTEN_TIMEOUT_S)
         except asyncio.CancelledError:
+            return
+        # 번역 모드는 사용자가 /stop 으로만 빠져나가므로 타임아웃 무효
+        if MODE.is_translate():
             return
         if state == "LISTENING":
             console.log("\n⌛ 입력이 없어 대기 상태로 돌아갑니다.")
@@ -201,7 +233,29 @@ async def main():
         _drain_text_queue()
         await enter_listening(cue=True)
 
+    async def start_translate(src_lang: str | None):
+        """번역 모드 진입: 모든 발화를 받아 한국어로 옮긴다. /stop 까지 무한 듣기."""
+        nonlocal response
+        await cancel(response); response = None
+        player.flush()
+        _drain_text_queue()
+        MODE.start_translate(src_lang=src_lang)
+        suffix = f" (입력 언어: {src_lang})" if src_lang else " (입력 언어 자동 감지)"
+        console.log(f"🌐 번역 모드 시작{suffix}. 끝내려면 /stop.")
+        await enter_listening(cue=False)
+
+    async def stop_translate():
+        """번역 모드 종료 → 평상시 대기로."""
+        if not MODE.is_translate():
+            console.log("번역 모드가 아닙니다.")
+            return
+        MODE.end_translate()
+        console.log("🌐 번역 모드 종료.")
+        idle()
+
     cmd_ctx["trigger_wake"] = trigger_wake
+    cmd_ctx["start_translate"] = start_translate
+    cmd_ctx["stop_translate"] = stop_translate
 
     async def audio_loop():
         """마이크 이벤트 소비."""
@@ -210,6 +264,9 @@ async def main():
             wake_detect=wake.detect, is_speaking=player.is_speaking
         ):
             if kind == "wake":
+                # 번역 모드 중에는 호출어로 빠져나가지 않는다 (/stop 만 종료)
+                if MODE.is_translate():
+                    continue
                 await trigger_wake()
             elif kind == "start":
                 if state == "LISTENING":

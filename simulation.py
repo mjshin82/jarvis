@@ -244,12 +244,28 @@ class _Mode:
         self.asked_keys: list[str] = []
         # 시뮬 진입 시 평상시 음성 제외한 풀에서 무작위 선택, 진입 동안 유지
         self.sim_voice: str | None = None
+        # 번역 모드 (/trans): 호출어 없이 모든 발화를 잡아 한국어로 옮긴다.
+        # /stop 으로만 종료. 시뮬레이션과 독립적으로 켜고 끌 수 있다.
+        self.translate: bool = False
+        self.translate_src_lang: str | None = None   # None = 자동 감지
 
     def is_pending_mode(self) -> bool:
         return self.pending_scenario is not None and self.scenario is None
 
     def active(self) -> bool:
         return self.scenario is not None
+
+    def is_translate(self) -> bool:
+        return self.translate
+
+    def start_translate(self, src_lang: str | None = None) -> None:
+        """번역 모드 진입. src_lang=None 이면 자동 감지."""
+        self.translate = True
+        self.translate_src_lang = src_lang
+
+    def end_translate(self) -> None:
+        self.translate = False
+        self.translate_src_lang = None
 
     def start(self, key: str, practice: str = "live") -> Scenario | None:
         sc = load_scenario(key)
@@ -299,15 +315,16 @@ class _Mode:
         return None
 
     def stt_lang(self) -> str:
-        """현재 상태에 맞는 STT 언어. 잘못 잡으면 영어 발화가 한국어로 음역되는 일이 생기므로
-        무조건 시나리오 언어로 고정하되, '선택 대기' 상태(다시/예시/다음 같은 한국어 명령
-        대기)일 때만 한국어로 고정."""
+        """현재 상태에 맞는 STT 언어. 잘못 잡으면 영어 발화가 한국어로 음역되는 일이
+        생기므로 상태별로 명시 고정한다."""
+        # 번역 모드: 인자로 지정된 언어, 없으면 자동 감지(None)
+        if self.translate:
+            return self.translate_src_lang   # None 이면 stt.py 가 자동 감지로 처리
         if not self.scenario:
             return config.WHISPER_LANG
         # guided 에서 사용자가 선택을 말할 때는 한국어 고정
         if self.practice == "guided" and self.state == ST_WAITING_CHOICE:
             return "ko"
-        # 그 외(영어 시도, live 의 모든 응답)는 시나리오 언어(영어)
         return self.scenario.lang
 
     def tts_lang(self) -> str:

@@ -101,3 +101,25 @@ async def _mic(args: str, ctx: dict):
     await trigger()
     # 명령이 직접 상태(LISTENING)를 잡았음을 알려 후속 idle 을 막는다.
     ctx["handled_state"] = True
+
+
+@command("trans", help="번역 모드 — 발화를 한국어로 옮김 (/stop 까지)",
+         usage="[en|ja|...]")
+async def _trans(args: str, ctx: dict):
+    """선택 인자로 입력 언어 강제 가능. 없으면 자동 감지."""
+    starter = ctx.get("start_translate")
+    if starter is None:
+        ctx["log"]("이 환경에서는 번역 모드를 사용할 수 없습니다.")
+        return
+    lang = args.strip() or None
+    await starter(lang)
+    ctx["handled_state"] = True   # LISTENING 상태로 진입했으니 idle 막기
+
+
+@command("stop", help="번역 모드 등 현재 진행 모드를 종료")
+async def _stop(args: str, ctx: dict):
+    stopper = ctx.get("stop_translate")
+    if stopper is None:
+        ctx["log"]("종료할 모드가 없습니다.")
+        return
+    await stopper()

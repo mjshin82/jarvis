@@ -39,8 +39,13 @@ class STT:
             return ""
         if float(np.sqrt(np.mean(audio ** 2))) < _MIN_RMS:
             return ""
-        lang = MODE.stt_lang() or self.lang   # 시뮬 모드면 그 언어, 평상시면 기본
-        # 상태 특화 프롬프트가 있으면 그걸 우선(좁고 강한 힌트). 없으면 한국어 한정 워드북.
+        # 번역 모드는 의도적으로 자동 감지(language=None) 를 쓸 수 있다.
+        # 그래서 'or self.lang' 폴백을 하면 안 됨 — 자동 감지가 ko 로 덮여버린다.
+        if MODE.is_translate():
+            lang = MODE.stt_lang()   # None 그대로 (자동 감지)
+        else:
+            lang = MODE.stt_lang() or self.lang
+        # 상태 특화 프롬프트가 있으면 그걸 우선. 한국어 워드북은 한국어 모드에서만.
         prompt = MODE.stt_initial_prompt()
         if prompt is None and lang == "ko":
             prompt = self.initial_prompt

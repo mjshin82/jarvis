@@ -131,6 +131,40 @@ async def live_phrase(client: AsyncOpenAI, model: str,
         return question
 
 
+_TRANSLATE_SYS = (
+    "You are a translator. Translate the user's text into natural, conversational Korean.\n"
+    "Rules:\n"
+    " - Output ONLY the Korean translation. No explanations, no quotes, no source text.\n"
+    " - If the text is already in Korean, output it as-is.\n"
+    " - Keep the tone informal but polite (해요체).\n"
+    " - Preserve proper nouns; transliterate only when natural."
+)
+
+
+async def translate_to_korean(client, model, text: str, extra: dict) -> str:
+    """한 줄 발화를 한국어로 옮긴다. 실패하면 원문 그대로."""
+    text = text.strip()
+    if not text:
+        return ""
+    try:
+        r = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": _TRANSLATE_SYS},
+                {"role": "user", "content": text},
+            ],
+            max_tokens=400,
+            temperature=0.2,
+            extra_body=extra,
+        )
+        out = (r.choices[0].message.content or "").strip()
+        # 따옴표/마크다운 제거
+        return out.strip("'\"`").strip() or text
+    except Exception as ex:
+        print(f"[coach] translate fallback: {ex}")
+        return text
+
+
 # --- 고정 멘트 ---
 CHOICES_PROMPT = "다시 답해볼까요, 예시를 한 번 더 들어볼까요, 아니면 다음 질문으로 갈까요?"
 TRY_AGAIN_PROMPT = "좋아요, 다시 한번 답해보세요."
