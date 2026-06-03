@@ -54,19 +54,26 @@
     background: var(--card); border: 1px solid var(--border); border-radius: 12px;
     padding: 12px 14px; margin: 10px 0;
   }
+  /* 조합 중(미확정) 카드: 점선 테두리 + 흐릿한 색으로 한눈에 구분 */
+  .card.draft {
+    background: transparent;
+    border: 1px dashed var(--border);
+    color: var(--partial);
+  }
+  .card.draft .src { color: var(--partial); }
   .src { font-size: 18px; }
   .tx { font-size: 17px; margin-top: 6px; }
   .tx.ko { color: var(--ko); }
   .tx.en { color: var(--en); }
   .info { color: var(--muted); font-size: 13px; }
   .meta { color: var(--muted); font-size: 12px; margin-top: 4px; }
-  #partial {
-    position: sticky; bottom: 0;
-    background: var(--bg); border-top: 1px dashed var(--border);
-    padding: 8px 16px; color: var(--partial); font-size: 14px;
-    min-height: 0; transition: min-height 0.15s;
+  /* 깜빡이는 점 — 진행 중이라는 신호 */
+  .draft .src::after {
+    content: "▍"; display: inline-block; margin-left: 4px;
+    animation: blink 1s steps(2, start) infinite;
+    opacity: 0.6;
   }
-  #partial.show { min-height: 28px; }
+  @keyframes blink { to { visibility: hidden; } }
   .lockbar {
     position: fixed; bottom: 48px; left: 50%; transform: translateX(-50%);
     background: var(--accent); color: white; padding: 6px 14px; border-radius: 999px;
@@ -85,20 +92,19 @@
     <div class="conn" id="conn">···</div>
   </header>
   <main id="log"></main>
-  <div id="partial"></div>
   <div class="lockbar" id="lockbar">↓ 새 자막 보기</div>
 
 <script>
 (() => {
   const key = location.pathname.replace(/^\/m\//, "");
   const log = document.getElementById("log");
-  const partialEl = document.getElementById("partial");
   const titleEl = document.getElementById("title");
   const metaBadge = document.getElementById("meta-badge");
   const connEl = document.getElementById("conn");
   const lockbar = document.getElementById("lockbar");
 
-  let lastCard = null;
+  let lastCard = null;     // 직전 확정 카드(source 가 만든 것) — 번역 카드를 여기에 붙임
+  let draftCard = null;    // 현재 진행 중 partial 카드 (확정 source 오면 정식 카드로 전환)
   let lockedToBottom = true;
   let publisherConnected = false;
 
@@ -149,11 +155,18 @@
         break;
       }
       case "source": {
-        const card = newCard();
-        card.innerHTML = `<div class="src">🧑 ${escapeHtml(ev.text || "")}</div>`;
+        // partial 로 만든 draft 가 있으면 그걸 확정 카드로 승격 — 카드 위치가 안 바뀜
+        let card;
+        if (draftCard) {
+          card = draftCard;
+          card.classList.remove("draft");
+          card.innerHTML = `<div class="src">🧑 ${escapeHtml(ev.text || "")}</div>`;
+          draftCard = null;
+        } else {
+          card = newCard();
+          card.innerHTML = `<div class="src">🧑 ${escapeHtml(ev.text || "")}</div>`;
+        }
         lastCard = card;
-        partialEl.textContent = "";
-        partialEl.classList.remove("show");
         break;
       }
       case "translation_ko":
@@ -171,12 +184,23 @@
         break;
       }
       case "partial": {
-        partialEl.textContent = "📝 " + (ev.text || "");
-        partialEl.classList.add("show");
-        return;  // 카드 추가 X
+        // 진행 중 카드(draft) 를 본문에 인라인으로 표시/업데이트.
+        // source 가 오면 같은 카드가 확정 카드로 승격된다.
+        if (!draftCard) {
+          draftCard = newCard();
+          draftCard.classList.add("draft");
+        }
+        draftCard.innerHTML = `<div class="src">🧑 ${escapeHtml(ev.text || "")}</div>`;
+        scrollIfLocked();
+        return;
       }
       case "gap":
         lastCard = null;
+        // draft 가 source 없이 끝나 남았다면(드뭄) 흔적 정리
+        if (draftCard) {
+          draftCard.remove();
+          draftCard = null;
+        }
         return;
       case "end": {
         const card = newCard();
