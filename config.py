@@ -65,7 +65,7 @@ STOP_FILLER = "네, 끌게요."                   # 음악 중지 멘트
 BROWSER_APP = os.getenv("BROWSER_APP", "Google Chrome")   # macOS 앱 이름
 
 # AEC 오디오 백엔드 (macOS VoiceProcessingIO)
-AEC = os.getenv("AEC", "auto").lower()              # auto | on | off (auto: 맥이면 AEC 시도, 실패 시 sounddevice 폴백)
+AEC = os.getenv("AEC", "off").lower()               # auto | on | off (off: Swift 데몬 미사용, sounddevice 백엔드)
 AUDIOD_PATH = os.getenv("AUDIOD_PATH", "./audiod")  # Swift 데몬 바이너리 경로
 AUDIOD_SRC = "audiod.swift"
 
