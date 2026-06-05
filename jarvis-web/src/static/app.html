@@ -39,10 +39,9 @@
 
   #controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
     padding: 10px 14px; border-bottom: 1px solid var(--border); }
+  body[data-view="home"] #controls { display: none; }   /* 홈은 음성 버튼만 사용 */
   button { font-size: 15px; padding: 8px 16px; border-radius: 10px; border: none; background: var(--accent); color: #fff; cursor: pointer; }
   button.off { background: #dc2626; }
-  #mic-level { width: 120px; height: 8px; background: #ddd4; border-radius: 4px; overflow: hidden; }
-  #mic-bar { height: 100%; width: 0%; background: #22c55e; }
   #meeting-stop { display: none; background: #dc2626; }
   body[data-view="meeting"] #meeting-stop { display: inline-block; }
   #voice-toggle {
@@ -106,8 +105,6 @@
     <span id="conn">···</span>
   </header>
   <div id="controls">
-    <button id="mic-toggle">🎙️ 마이크 켜기</button>
-    <div id="mic-level" class="hidden"><div id="mic-bar"></div></div>
     <button id="meeting-stop">🛑 회의 종료</button>
   </div>
 
@@ -377,7 +374,8 @@
     if (micOn && wakeLock === null && document.visibilityState === "visible") requestWakeLock();
   });
   function loseMic(msg) {
-    micStop(); micOn = false; $("mic-toggle").textContent = "🎙️ 마이크 켜기"; $("mic-toggle").classList.remove("off");
+    micStop(); micOn = false;
+    voiceOn = false; $("voice-toggle").classList.remove("active");   // 마이크 끊김 → 음성 버튼 비활성
     if (msg) alert(msg);
   }
   async function micStart() {
@@ -397,13 +395,10 @@
     const srcNode = micCtx.createMediaStreamSource(micStream);
     micNode = micCtx.createScriptProcessor(4096, 1, 1);
     srcNode.connect(micNode); micNode.connect(micCtx.destination);
-    $("mic-level").classList.remove("hidden");
     await requestWakeLock();
     micNode.onaudioprocess = (ev) => {
       const inp = ev.inputBuffer.getChannelData(0);
-      if (!micWS || micWS.readyState !== 1) { $("mic-bar").style.width = "0%"; return; }
-      let peak = 0; for (let i = 0; i < inp.length; i++) peak = Math.max(peak, Math.abs(inp[i]));
-      $("mic-bar").style.width = Math.min(100, peak * 140) + "%";
+      if (!micWS || micWS.readyState !== 1) return;
       micWS.send(floatToInt16(downsample(inp, micCtx.sampleRate)).buffer);
     };
   }
@@ -414,17 +409,7 @@
     if (micCtx) { micCtx.close(); micCtx = null; }
     if (micStream) { micStream.getTracks().forEach((t) => t.stop()); micStream = null; }
     if (micWS) { try { micWS.close(); } catch {} micWS = null; }
-    $("mic-bar").style.width = "0%"; $("mic-level").classList.add("hidden");
   }
-  $("mic-toggle").addEventListener("click", async () => {
-    ensureAudio();
-    micOn = !micOn;
-    $("mic-toggle").textContent = micOn ? "🎙️ 마이크 끄기" : "🎙️ 마이크 켜기";
-    $("mic-toggle").classList.toggle("off", micOn);
-    if (micOn) { try { await micStart(); } catch (e) { alert("마이크 권한 실패: " + e.message); micOn = false; $("mic-toggle").textContent = "🎙️ 마이크 켜기"; $("mic-toggle").classList.remove("off"); } }
-    else micStop();
-  });
-
   // ---- 제어 채널(웹 → jarvis) one-shot 전송 ----
   function sendControl(obj) {
     const pw = getPw();
@@ -448,10 +433,6 @@
 
   // ---- 음성 토글 (핸즈프리: 마이크 ON + 즉시 청취, 타임아웃 없음) ----
   let voiceOn = false;
-  function syncMicUI() {
-    $("mic-toggle").textContent = micOn ? "🎙️ 마이크 끄기" : "🎙️ 마이크 켜기";
-    $("mic-toggle").classList.toggle("off", micOn);
-  }
   $("voice-toggle").addEventListener("click", async () => {
     const pw = getPw();
     if (!pw) { showLogin(); return; }
@@ -460,7 +441,7 @@
     $("voice-toggle").classList.toggle("active", voiceOn);
     if (voiceOn) {
       if (!micOn) {
-        try { await micStart(); micOn = true; syncMicUI(); }
+        try { await micStart(); micOn = true; }
         catch (e) {
           alert("마이크 권한 실패: " + e.message);
           voiceOn = false; $("voice-toggle").classList.remove("active"); return;
@@ -469,7 +450,7 @@
       sendControl({ kind: "listen_start" });
     } else {
       sendControl({ kind: "listen_stop" });
-      if (micOn) { micStop(); micOn = false; syncMicUI(); }
+      if (micOn) { micStop(); micOn = false; }
     }
   });
 
