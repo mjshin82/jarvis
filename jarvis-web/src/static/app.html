@@ -129,8 +129,13 @@
   });
 
   // ---- 뷰 전환 (리로드 없음) ----
+  let meetingTitle = "🎤 Meeting";   // applyMeta 가 갱신; 제목은 뷰에 따라 표시
   function pathIsMeeting() { return /\/meeting\/?$/.test(location.pathname); }
-  function setView(v) { document.body.dataset.view = (v === "meeting" ? "meeting" : "home"); }
+  function setView(v) {
+    const nv = (v === "meeting" ? "meeting" : "home");
+    document.body.dataset.view = nv;
+    $("title").textContent = nv === "meeting" ? meetingTitle : "🤖 Jarvis";
+  }
   function showView(v) {
     const nv = (v === "meeting" ? "meeting" : "home");
     if (document.body.dataset.view === nv) return;
@@ -186,10 +191,11 @@
   function scrollIfLocked() { if (lockedToBottom) window.scrollTo({ top: document.body.scrollHeight }); }
   function applyMeta(meta) {
     if (!meta) return;
-    const partner = meta.partner || "?", user = meta.user || "?";
-    $("title").textContent = partner ? `🎤 ${partner} ↔ ${user}` : "🎤 Meeting";
+    const user = meta.user || "?";
+    meetingTitle = meta.partner ? `🎤 ${meta.partner} ↔ ${user}` : "🎤 Meeting";
+    if (document.body.dataset.view === "meeting") $("title").textContent = meetingTitle;
     const tags = [];
-    if (meta.partner_lang) tags.push(`${partner}: ${meta.partner_lang}`);
+    if (meta.partner_lang) tags.push(`${meta.partner}: ${meta.partner_lang}`);
     if (meta.user_lang) tags.push(`${user}: ${meta.user_lang}`);
     $("meta-badge").textContent = tags.join(" · ");
   }
