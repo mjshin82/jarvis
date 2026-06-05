@@ -165,7 +165,7 @@
       </div>
       <div class="sheet-row">
         <div class="sheet-label">미팅 STT</div>
-        <label><input type="radio" name="set-stt" value="deepgram"> Deepgram</label>
+        <label><input type="radio" name="set-stt" value="gladia"> Gladia</label>
         <label><input type="radio" name="set-stt" value="local"> 로컬</label>
       </div>
     </div>
@@ -555,7 +555,7 @@
   function curSettings() {
     const t = document.querySelector('input[name="set-translate"]:checked');
     const s = document.querySelector('input[name="set-stt"]:checked');
-    return { translate_backend: t ? t.value : "deepseek", stt_backend: s ? s.value : "deepgram" };
+    return { translate_backend: t ? t.value : "deepseek", stt_backend: s ? s.value : "gladia" };
   }
   $("menu-settings").addEventListener("click", () => {
     $("plus-menu").classList.add("hidden");
