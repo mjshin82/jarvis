@@ -20,6 +20,9 @@ LLM 으로 흘러간다(STT 만 건너뛰고 이후 파이프라인은 동일). 
 utterance 가 돼도 무시되고, 오직 진짜 호출어/텍스트 입력만 상태를 전환한다.
 """
 import asyncio
+import time
+
+import numpy as np
 
 import config
 import console
@@ -48,6 +51,24 @@ async def main():
     await llm.warmup()
     console.start()                                 # 콘솔 입력 활성화 (하단 프롬프트)
     player_task = asyncio.create_task(player.run())
+    # 상시 웹 퍼블리셔 (대화/TTS/회의자막 공용). RELAY 설정 시 항상 연결.
+    web_pub = None
+    web_speaking_until = 0.0   # 웹으로 TTS 재생 추정 종료 시각(에코 게이트)
+    if config.RELAY_URL and config.RELAY_TOKEN:
+        from relay_client import RelayClient
+        from live_translate import MeetingMeta
+        web_pub = RelayClient(
+            config.RELAY_URL, config.RELAY_TOKEN, MeetingMeta(my_name=config.USER_NAME),
+            on_log=console.log, connect_timeout=config.RELAY_TIMEOUT_S,
+        )
+        await web_pub.connect()
+        home_base = config.RELAY_URL.replace("wss://", "https://").replace("ws://", "http://")
+        home_url = f"{home_base}/{config.ROOM_KEY}"
+        bw = max(len(home_url) + 4, 60); border = "─" * bw
+        console.log(""); console.log(f"┌{border}┐")
+        console.log(f"│  🤖 Jarvis 웹 (로그인 후 대화/마이크)".ljust(bw + 1) + "│")
+        console.log(f"│  {home_url}".ljust(bw + 1) + "│")
+        console.log(f"└{border}┘"); console.log("")
     # 원격 마이크 (옵션): 웹 프론트가 보내는 외부 마이크 스트림을 relay 역방향으로 수신.
     remote_mic_rx = None
     remote_mic_monitor = None
@@ -67,16 +88,6 @@ async def main():
 
         mic.router.on_switch = _on_mic_switch
         remote_mic_monitor = asyncio.create_task(mic.router.run_idle_monitor())
-        cap_base = config.RELAY_URL.replace("wss://", "https://").replace("ws://", "http://")
-        cap_url = f"{cap_base}/{config.ROOM_KEY}"
-        box_width = max(len(cap_url) + 4, 60)
-        border = "─" * box_width
-        console.log("")
-        console.log(f"┌{border}┐")
-        console.log(f"│  📱 회의/원격마이크 페이지 (admin 로그인 후 mic 토글)".ljust(box_width + 1) + "│")
-        console.log(f"│  {cap_url}".ljust(box_width + 1) + "│")
-        console.log(f"└{border}┘")
-        console.log("")
     state = "WAITING_WAKE"
     response: asyncio.Task | None = None   # 진행 중 응답 흐름 (텍스트 또는 음성)
     watchdog: asyncio.Task | None = None   # LISTENING 타임아웃
@@ -121,26 +132,34 @@ async def main():
         watchdog = asyncio.create_task(listen_timeout())
 
     async def speak_response(text: str):
-        """입력 텍스트(STT 결과 또는 콘솔 입력) → LLM → TTS 재생.
-        각 문장은 별도의 한 줄로 출력한다. prompt_toolkit 의 patch_stdout 은
-        '완전한 한 줄' 단위로만 입력 박스 위에 누적하기 때문에, end='' 로
-        부분 라인을 흘리면 입력 박스 영역과 섞여 사라진다."""
+        """입력 텍스트 → LLM → TTS. 텍스트/오디오를 웹으로도 발행.
+        TTS 는 원격 마이크 활성 시 웹(폰)으로만, 아니면 로컬 스피커로."""
+        nonlocal web_speaking_until
         console.log(f"🧑 {text}")
-        console.set_status("생각 중…")   # 첫 문장 나올 때까지 진행 표시
+        if web_pub is not None:
+            web_pub.emit("user", text)
+        console.set_status("생각 중…")
         first = True
         try:
             async for sentence in llm.respond(text):
                 if first:
-                    console.set_status(None)   # 응답 시작 → 표시 끄기
+                    console.set_status(None)
                 prefix = "🤖 " if first else "   "
                 console.log(f"{prefix}{sentence}")
                 first = False
+                if web_pub is not None:
+                    web_pub.emit("assistant", sentence)
                 wav, sr = await tts.synth(sentence)
-                await player.enqueue(wav, sr)
+                if web_pub is not None and mic.router.active == "remote":
+                    pcm16 = (np.clip(wav, -1.0, 1.0) * 32767).astype(np.int16).tobytes()
+                    web_pub.emit_audio(pcm16, sr)
+                    dur = len(wav) / float(sr)
+                    web_speaking_until = max(web_speaking_until, time.monotonic()) + dur
+                else:
+                    await player.enqueue(wav, sr)
         finally:
-            console.set_status(None)   # 예외/취소 시에도 반드시 끄기
+            console.set_status(None)
         if first:
-            # 응답이 비어있었던 경우(드뭄): 빈 🤖 줄로 표시는 생략
             pass
 
     async def _translate_bg(audio):
@@ -372,31 +391,11 @@ async def main():
             # 활성 소스 블록을 메인 VAD 대신 RealtimeSTT 로 우회 (소스 전환은 동적)
             mic.router.set_tap(sess.feed_block)
             console.log(f"🎤 회의를 시작합니다. 회의 번호: {meta.key}")
-            # 외부 중계 활성 (옵션) — 자막 페이지 URL 을 박스로 강조 표시
-            if config.RELAY_URL and config.RELAY_TOKEN:
-                from relay_client import RelayClient
-                relay = RelayClient(
-                    config.RELAY_URL, config.RELAY_TOKEN, meta,
-                    on_log=console.log,
-                    connect_timeout=config.RELAY_TIMEOUT_S,
-                )
-                ok = await relay.connect()
-                if ok:
-                    sess.add_listener(relay.emit_async)
-                    sess._relay = relay   # stop() 에서 close
-                    # http 보기 URL 안내 (ws → http 로 단순 치환)
-                    view_base = config.RELAY_URL.replace("wss://", "https://").replace("ws://", "http://")
-                    view_url = f"{view_base}/{meta.key}/meeting"
-                    box_width = max(len(view_url) + 4, 60)
-                    border = "─" * box_width
-                    console.log("")
-                    console.log(f"┌{border}┐")
-                    console.log(f"│  🌐 자막 페이지 (이 URL 을 참석자에게 공유)".ljust(box_width + 1) + "│")
-                    console.log(f"│  {view_url}".ljust(box_width + 1) + "│")
-                    console.log(f"└{border}┘")
-                    console.log("")
-                else:
-                    console.log("🌐 중계 서버 연결 실패 — 콘솔만으로 진행합니다.")
+            # 상시 web_pub 으로 자막 중계 (회의 전용 연결을 따로 만들지 않음)
+            if web_pub is not None:
+                sess.add_listener(web_pub.emit_async)
+                view_base = config.RELAY_URL.replace("wss://", "https://").replace("ws://", "http://")
+                console.log(f"🌐 자막: {view_base}/{meta.key}/meeting")
         except Exception as ex:
             mic.router.set_tap(None)
             console.log(f"회의 모드 시작 실패: {ex}")
@@ -428,7 +427,8 @@ async def main():
         """마이크 이벤트 소비."""
         nonlocal state, response, watchdog
         async for kind, audio in mic.events(
-            wake_detect=wake.detect, is_speaking=player.is_speaking
+            wake_detect=wake.detect,
+            is_speaking=lambda: player.is_speaking() or time.monotonic() < web_speaking_until,
         ):
             if kind == "wake":
                 # 번역 모드 중에는 호출어로 빠져나가지 않는다 (/stop 만 종료)
@@ -510,6 +510,11 @@ async def main():
         await cancel(response)
         await cancel(watchdog)
         player_task.cancel()
+        if web_pub is not None:
+            try:
+                await web_pub.close()
+            except Exception:
+                pass
         if remote_mic_monitor is not None:
             remote_mic_monitor.cancel()
         if remote_mic_rx is not None:

@@ -76,12 +76,16 @@ export class MeetingDO {
     this.publisher = ws;
 
     ws.addEventListener("message", (msg) => {
+      const data = (msg as MessageEvent).data;
+      if (data instanceof ArrayBuffer) {
+        // TTS 오디오 — viewer 에게 raw binary broadcast (replay 버퍼 미적재)
+        this.broadcastBinary(data);
+        return;
+      }
       let parsed: ClientMessage | null = null;
       try {
-        const raw = typeof msg.data === "string" ? msg.data : new TextDecoder().decode(msg.data);
-        parsed = JSON.parse(raw) as ClientMessage;
+        parsed = JSON.parse(data as string) as ClientMessage;
       } catch {
-        // 무효 메시지 무시
         return;
       }
       this.handlePublisherMessage(parsed);
@@ -225,6 +229,12 @@ export class MeetingDO {
   private broadcast(ev: RelayEvent): void {
     for (const ws of this.viewers) {
       this.safeSend(ws, ev);
+    }
+  }
+
+  private broadcastBinary(data: ArrayBuffer): void {
+    for (const ws of this.viewers) {
+      try { ws.send(data); } catch { /* 끊긴 소켓 — close 에서 정리 */ }
     }
   }
 
