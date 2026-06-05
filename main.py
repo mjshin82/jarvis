@@ -48,6 +48,28 @@ async def main():
     await llm.warmup()
     console.start()                                 # 콘솔 입력 활성화 (하단 프롬프트)
     player_task = asyncio.create_task(player.run())
+    # 원격 마이크 (옵션): 웹 프론트가 보내는 외부 마이크 스트림을 relay 역방향으로 수신.
+    remote_mic_rx = None
+    remote_mic_monitor = None
+    if config.REMOTE_MIC_ENABLED and config.RELAY_URL and config.RELAY_TOKEN:
+        from remote_mic_receiver import RemoteMicReceiver
+        remote_mic_rx = RemoteMicReceiver(
+            config.RELAY_URL, config.RELAY_TOKEN, mic.router,
+            on_log=console.log, key=config.REMOTE_MIC_KEY,
+            connect_timeout=config.RELAY_TIMEOUT_S,
+        )
+        remote_mic_rx.start()
+        remote_mic_monitor = asyncio.create_task(mic.router.run_idle_monitor())
+        cap_base = config.RELAY_URL.replace("wss://", "https://").replace("ws://", "http://")
+        cap_url = f"{cap_base}/capture/{config.REMOTE_MIC_KEY}"
+        box_width = max(len(cap_url) + 4, 60)
+        border = "─" * box_width
+        console.log("")
+        console.log(f"┌{border}┐")
+        console.log(f"│  📱 원격 마이크 (이 URL 을 폰/타블렛에서 열기)".ljust(box_width + 1) + "│")
+        console.log(f"│  {cap_url}".ljust(box_width + 1) + "│")
+        console.log(f"└{border}┘")
+        console.log("")
     state = "WAITING_WAKE"
     response: asyncio.Task | None = None   # 진행 중 응답 흐름 (텍스트 또는 음성)
     watchdog: asyncio.Task | None = None   # LISTENING 타임아웃
@@ -63,6 +85,7 @@ async def main():
         "tts": tts,
         "llm": llm,
         "request_exit": exit_event.set,
+        "mic_router": (mic.router if config.REMOTE_MIC_ENABLED else None),
     }
 
     def idle():
@@ -470,6 +493,13 @@ async def main():
         await cancel(response)
         await cancel(watchdog)
         player_task.cancel()
+        if remote_mic_monitor is not None:
+            remote_mic_monitor.cancel()
+        if remote_mic_rx is not None:
+            try:
+                await remote_mic_rx.close()
+            except Exception:
+                pass
         try:
             await backend.close()
         except Exception:

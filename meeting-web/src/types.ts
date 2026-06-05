@@ -10,7 +10,10 @@ export type EventKind =
   | "gap"                  // 발화 묶음 사이 빈 줄
   | "end"                  // publisher 종료
   | "kicked"               // 새 publisher 가 들어와 기존 publisher 강퇴
-  | "publisher_disconnected"; // viewer 에게 publisher 연결 끊김 통보
+  | "publisher_disconnected" // viewer 에게 publisher 연결 끊김 통보
+  | "mic_start"
+  | "mic_stop"
+  | "no_receiver";
 
 export interface MeetingMeta {
   key: string;

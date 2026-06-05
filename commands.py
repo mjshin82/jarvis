@@ -92,14 +92,26 @@ async def _tts(args: str, ctx: dict):
     await ctx["player"].enqueue(wav, sr)
 
 
-@command("mic", help="듣기 모드로 전환 ('Hey Jarvis' 호출과 동일)")
+@command("mic", help="듣기 모드 진입 / 마이크 소스 전환", usage="[phone|system|auto]")
 async def _mic(args: str, ctx: dict):
+    arg = args.strip().lower()
+    if arg in ("phone", "remote", "system", "local", "auto"):
+        router = ctx.get("mic_router")
+        if router is None:
+            ctx["log"]("원격 마이크가 비활성화되어 있습니다 (REMOTE_MIC_ENABLED).")
+            return
+        mode = {"phone": "remote", "remote": "remote",
+                "system": "local", "local": "local", "auto": "auto"}[arg]
+        router.set_override(mode)
+        label = {"remote": "원격(폰)", "local": "시스템", "auto": "자동"}[mode]
+        ctx["log"](f"🎙️ 마이크 소스: {label}")
+        return
+    # 무인자 → 기존 동작(듣기 모드 진입 = 'Hey Jarvis' 와 동일)
     trigger = ctx.get("trigger_wake")
     if trigger is None:
         ctx["log"]("이 환경에서는 마이크 트리거를 사용할 수 없습니다.")
         return
     await trigger()
-    # 명령이 직접 상태(LISTENING)를 잡았음을 알려 후속 idle 을 막는다.
     ctx["handled_state"] = True
 
 
