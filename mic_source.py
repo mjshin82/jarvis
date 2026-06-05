@@ -38,3 +38,85 @@ class RemoteMicSource:
 
     def reset(self) -> None:
         self._buf = np.empty(0, dtype=np.float32)
+
+
+class MicRouter:
+    """활성 마이크 소스를 골라 그 블록만 block_queue 로 흘린다.
+
+    mode: 'auto'  — 원격 프레임이 오면 remote, idle 초과 시 local 복귀
+          'local' — 시스템 마이크 강제
+          'remote'— 원격 강제
+    """
+
+    def __init__(self, block_queue, *, local=None, remote=None, clock=time.monotonic):
+        self._q = block_queue
+        self._clock = clock
+        self._mode = "auto"
+        self._active = "local"
+        self._last_remote = 0.0
+        self.local = local if local is not None else LocalMicSource(sink=self._sink_local)
+        self.remote = remote if remote is not None else RemoteMicSource(sink=self._sink_remote)
+
+    # --- sink (소스가 블록을 흘려보낼 때 호출) ---
+    def _sink_local(self, block):
+        if self._active == "local":
+            self._q.put(block)
+
+    def _sink_remote(self, block):
+        if self._active == "remote":
+            self._q.put(block)
+
+    # --- 라이프사이클 ---
+    def start(self):
+        self.local.start()
+
+    def stop(self):
+        self.local.stop()
+
+    def pause_local(self):
+        self.local.stop()
+
+    def resume_local(self):
+        self.local.start()
+
+    # --- 원격 수신 진입점 (RemoteMicReceiver 가 호출) ---
+    def on_remote_frame(self, pcm_bytes):
+        self.note_remote_activity(self._clock())
+        self.remote.feed(pcm_bytes)
+
+    # --- 전환 로직 ---
+    def note_remote_activity(self, now):
+        self._last_remote = now
+        if self._mode == "auto" and self._active != "remote":
+            self._switch("remote")
+
+    def check_idle(self, now):
+        if self._mode == "auto" and self._active == "remote":
+            if now - self._last_remote > config.REMOTE_MIC_IDLE_S:
+                self._switch("local")
+
+    def set_override(self, mode):
+        self._mode = mode
+        if mode == "local":
+            self._switch("local")
+        elif mode == "remote":
+            self._switch("remote")
+        # 'auto': 다음 활동/idle 검사를 따른다
+
+    def _switch(self, target):
+        if self._active == target:
+            return
+        self._active = target
+        # 소스 간 오디오 혼입 방지: 큐 잔여 비우고 원격 재청크 버퍼 리셋
+        try:
+            while True:
+                self._q.get_nowait()
+        except queue.Empty:
+            pass
+        self.remote.reset()
+
+    async def run_idle_monitor(self):
+        import asyncio
+        while True:
+            await asyncio.sleep(0.5)
+            self.check_idle(self._clock())
