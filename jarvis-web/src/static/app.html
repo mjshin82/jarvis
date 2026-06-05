@@ -71,6 +71,10 @@
   }
   #plus-menu.hidden { display: none; }
   #plus-menu button { background: var(--card); color: var(--fg); text-align: left; white-space: nowrap; }
+  #sound-hint { position: fixed; top: 60px; left: 50%; transform: translateX(-50%); z-index: 30;
+    background: var(--accent); color: #fff; padding: 8px 16px; border-radius: 999px; font-size: 14px;
+    cursor: pointer; box-shadow: 0 2px 10px #0005; }
+  #sound-hint.hidden { display: none; }
   /* dock 가림 방지 */
   #chat, #log { padding-bottom: 80px; }
 
@@ -124,6 +128,8 @@
     <span id="meta-badge"></span>
     <span id="conn">···</span>
   </header>
+  <div id="sound-hint" class="hidden">🔊 탭하여 소리 켜기</div>
+
   <div id="home-view">
     <main id="chat"></main>
   </div>
@@ -186,13 +192,25 @@
   }
 
   // ---- TTS Audio + 채팅 버블 (홈) ----
-  let audioCtx = null, playHead = 0;
+  let audioCtx = null, playHead = 0, keepAlive = null;
+  function soundHint(show) { const h = $("sound-hint"); if (h) h.classList.toggle("hidden", !show); }
   function ensureAudio() {
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     if (audioCtx.state === "suspended") audioCtx.resume();
+    if (!keepAlive) {   // 무음 keep-alive — iOS 가 유휴 시 컨텍스트를 일시중단하지 않게
+      const buf = audioCtx.createBuffer(1, Math.round(audioCtx.sampleRate), audioCtx.sampleRate);
+      keepAlive = audioCtx.createBufferSource();
+      keepAlive.buffer = buf; keepAlive.loop = true;
+      keepAlive.connect(audioCtx.destination);
+      try { keepAlive.start(); } catch {}
+    }
+    if (audioCtx.state === "running") soundHint(false);
   }
+  // 어떤 제스처든 오디오 재개(autoplay 정책 — 접속만 한 패시브 뷰어용)
+  ["touchend", "click"].forEach((e) => document.addEventListener(e, ensureAudio));
   function playAudio(buf) {
     ensureAudio();
+    if (audioCtx.state !== "running") soundHint(true);   // 제스처 전 — 탭하여 소리 켜기 안내
     const sr = new DataView(buf).getUint32(0, true);
     const pcm = new Int16Array(buf, 4);
     const f32 = new Float32Array(pcm.length);
@@ -378,7 +396,7 @@
   }
 
   // ---- mic-take (셸 레벨 — 뷰 전환에도 유지) ----
-  let micWS = null, micCtx = null, micNode = null, micStream = null, micOn = false, wakeLock = null;
+  let micWS = null, micNode = null, micStream = null, micOn = false, wakeLock = null;
   function downsample(input, inRate) {
     if (inRate === TARGET_SR) return input;
     const ratio = inRate / TARGET_SR, outLen = Math.floor(input.length / ratio);
@@ -420,23 +438,24 @@
       else if (micOn) loseMic("마이크 연결이 종료되었습니다.");
     };
     micStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
-    micCtx = new (window.AudioContext || window.webkitAudioContext)();
-    const srcNode = micCtx.createMediaStreamSource(micStream);
-    micNode = micCtx.createScriptProcessor(4096, 1, 1);
-    srcNode.connect(micNode); micNode.connect(micCtx.destination);
+    ensureAudio();   // 재생과 같은 AudioContext 공유 — 마이크 정지가 재생을 안 끊게(iOS)
+    const srcNode = audioCtx.createMediaStreamSource(micStream);
+    micNode = audioCtx.createScriptProcessor(4096, 1, 1);
+    srcNode.connect(micNode); micNode.connect(audioCtx.destination);   // 출력은 무음(echo 없음)
     await requestWakeLock();
     micNode.onaudioprocess = (ev) => {
       const inp = ev.inputBuffer.getChannelData(0);
       if (!micWS || micWS.readyState !== 1) return;
-      micWS.send(floatToInt16(downsample(inp, micCtx.sampleRate)).buffer);
+      micWS.send(floatToInt16(downsample(inp, audioCtx.sampleRate)).buffer);
     };
   }
   function micStop() {
     try { if (micWS && micWS.readyState === 1) micWS.send(JSON.stringify({ kind: "mic_stop" })); } catch {}
     if (wakeLock) { try { wakeLock.release(); } catch {} wakeLock = null; }
     if (micNode) { micNode.disconnect(); micNode.onaudioprocess = null; micNode = null; }
-    if (micCtx) { micCtx.close(); micCtx = null; }
     if (micStream) { micStream.getTracks().forEach((t) => t.stop()); micStream = null; }
+    // audioCtx 는 닫지 않음(재생 유지). iOS 가 마이크 정지로 일시중단했으면 재개.
+    if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
     if (micWS) { try { micWS.close(); } catch {} micWS = null; }
   }
   // ---- 제어 채널(웹 → jarvis) one-shot 전송 ----
