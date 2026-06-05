@@ -156,7 +156,11 @@ export class MeetingDO {
 
   private attachMicSender(ws: WebSocket): void {
     if (this.micSender) {
-      try { this.micSender.close(1000, "replaced"); } catch { /* */ }
+      try {
+        // 밀어내기 전에 통지 — 쫓겨난 admin 이 로컬 마이크를 정리할 수 있게
+        this.safeSend(this.micSender, this.buildEvent({ kind: "kicked", reason: "replaced" }));
+        this.micSender.close(1000, "replaced");
+      } catch { /* */ }
     }
     this.micSender = ws;
     ws.addEventListener("message", (msg) => {

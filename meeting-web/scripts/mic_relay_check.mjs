@@ -59,7 +59,13 @@ async function main() {
   const sync = await Promise.race([v2, new Promise((_, r) => setTimeout(() => r(new Error("timeout")), 3000))]).catch((e) => fail(e.message));
   console.log("신규 viewer 동기화:", sync.includes("remote") ? "OK" : `FAIL (${sync})`);
 
-  [recv, send, viewer, viewer2].forEach((w) => w.close());
+  // 6) last-wins: 두 번째 admin sender 가 첫 번째를 밀어내면 첫 번째가 kicked 수신
+  const kicked = nextMsg(send);
+  const send2 = await open(`${BASE}/mic/${KEY}?token=${ADMIN}`);
+  const km = await Promise.race([kicked, new Promise((_, r) => setTimeout(() => r(new Error("timeout")), 3000))]).catch((e) => fail(e.message));
+  console.log("takeover kicked 통지:", km.text && km.text.includes('"kicked"') ? "OK" : `FAIL (${km.text})`);
+
+  [recv, send, send2, viewer, viewer2].forEach((w) => w.close());
   process.exit(0);
 }
 main().catch((e) => fail(e));
