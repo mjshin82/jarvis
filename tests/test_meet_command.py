@@ -8,16 +8,15 @@ def _run(text, ctx):
     asyncio.run(commands.dispatch(text, ctx))
 
 
-def test_meet_phone_passes_use_remote_true():
-    got = {}
-    async def starter(use_remote): got["v"] = use_remote
-    _run("/meet phone", {"log": lambda *_: None, "start_meeting": starter})
-    assert got["v"] is True
-
-
-def test_meet_system_and_noarg_false():
-    got = []
-    async def starter(use_remote): got.append(use_remote)
-    _run("/meet system", {"log": lambda *_: None, "start_meeting": starter})
+def test_meet_calls_starter_no_arg():
+    called = []
+    async def starter(): called.append(True)
     _run("/meet", {"log": lambda *_: None, "start_meeting": starter})
-    assert got == [False, False]
+    assert called == [True]
+
+
+def test_meet_ignores_extra_args():
+    called = []
+    async def starter(): called.append(True)
+    _run("/meet phone", {"log": lambda *_: None, "start_meeting": starter})
+    assert called == [True]
