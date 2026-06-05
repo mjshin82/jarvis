@@ -122,9 +122,13 @@ async def main():
         "mic_router": (mic.router if config.REMOTE_MIC_ENABLED else None),
     }
 
+    recognizer = None   # 일반 대화 스트리밍 STT (없으면 배치 STT 폴백)
+
     def idle():
         nonlocal state
         state = "WAITING_WAKE"
+        if recognizer is not None:
+            mic.router.set_tap(None)   # 호출어 대기 — wake 감지가 블록을 받도록
         console.log("\n🎙️  'Hey Jarvis' 라고 부르거나 아래에 텍스트를 입력하세요.")
 
     async def cancel(task):
@@ -143,6 +147,8 @@ async def main():
         if cue:
             await player.enqueue_file(config.FX_WAKE)
         state = "LISTENING"
+        if recognizer is not None and not MODE.is_translate():
+            mic.router.set_tap(recognizer.feed_block)   # 블록을 RealtimeSTT 로 연속 피드
         if not MODE.is_translate():
             console.log("🔔 듣고 있어요…")
         watchdog = asyncio.create_task(listen_timeout())
@@ -523,6 +529,52 @@ async def main():
             state = "RESPONDING"
             response = asyncio.create_task(respond_flow_text(line))
 
+    # --- 일반 대화 스트리밍 STT: partial→콘솔/웹, final→응답 ---
+    def _on_stt_partial(text):
+        console.set_status(f"📝 {text[:80]}")
+        if web_pub is not None:
+            web_pub.emit("partial", text)
+
+    async def _respond_voice(text):
+        if text:
+            intent = mode_intent(text)
+            if intent:
+                await _handle_mode(intent, text)
+                return   # _handle_mode 가 상태(회의/idle) 관리
+            await speak_response(text)
+        else:
+            console.log("🧑 (인식된 음성 없음)")
+        while player.is_speaking():
+            await asyncio.sleep(0.1)
+        if config.FOLLOW_UP:
+            await enter_listening(cue=True)
+        else:
+            idle()
+
+    def _on_stt_final(text):
+        nonlocal state, response, watchdog
+        if state != "LISTENING":
+            return   # 응답/대기 중 들어온 stray final 무시
+        if watchdog is not None and not watchdog.done():
+            watchdog.cancel()
+        watchdog = None
+        mic.router.set_tap(None)   # 응답 중 인식 중단(자기 TTS 에코 방지)
+        state = "RESPONDING"
+        response = asyncio.create_task(_respond_voice((text or "").strip()))
+
+    try:
+        from streaming_stt import StreamingRecognizer
+        recognizer = StreamingRecognizer(
+            on_partial=_on_stt_partial, on_final=_on_stt_final,
+            model=config.MEET_STT_MODEL, realtime_model=config.MEET_STT_REALTIME_MODEL,
+            language=config.WHISPER_LANG, on_log=console.log,
+        )
+        await recognizer.start()
+        console.log("🗣️ 스트리밍 STT 준비됨 (호출어 후 실시간 인식)")
+    except Exception as e:
+        recognizer = None
+        console.log(f"스트리밍 STT 비활성 — 배치 STT 폴백: {e}")
+
     console.set_escape_handler(on_escape)   # Esc → 진행 응답 취소
     idle()
     audio_task = asyncio.create_task(audio_loop())
@@ -566,6 +618,11 @@ async def main():
         if control_rx is not None:
             try:
                 await control_rx.close()
+            except Exception:
+                pass
+        if recognizer is not None:
+            try:
+                await recognizer.close()
             except Exception:
                 pass
         try:
