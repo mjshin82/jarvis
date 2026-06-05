@@ -12,6 +12,7 @@ import queue
 import time
 
 import numpy as np
+import sounddevice as sd
 
 import config
 
@@ -38,6 +39,66 @@ class RemoteMicSource:
 
     def reset(self) -> None:
         self._buf = np.empty(0, dtype=np.float32)
+
+
+class LocalMicSource:
+    """시스템 마이크(sounddevice InputStream) → 512 float32 블록을 sink 로 방출."""
+
+    def __init__(self, sink):
+        self._sink = sink
+        self._stream = None
+
+    def _resolve_device(self):
+        """MIC_DEVICE 우선. 비었으면 입력 채널 있는 첫 물리 마이크 자동 선택
+        (BlackHole 등 가상장치 회피)."""
+        spec = config.MIC_DEVICE.strip()
+        if spec:
+            if spec.isdigit():
+                return int(spec)
+            for i, d in enumerate(sd.query_devices()):
+                if d["max_input_channels"] > 0 and spec.lower() in d["name"].lower():
+                    return i
+            print(f"[audio] MIC_DEVICE='{spec}' 매칭 실패 → 기본 장치 사용")
+            return None
+        skip = ("blackhole", "loopback", "aggregate", "teams", "soundflower")
+        for i, d in enumerate(sd.query_devices()):
+            if d["max_input_channels"] <= 0:
+                continue
+            if any(s in d["name"].lower() for s in skip):
+                continue
+            return i
+        return None
+
+    def _callback(self, indata, frames, time_info, status):
+        if status:
+            print(f"[audio] {status}")
+        self._sink(indata[:, 0].copy())
+
+    def start(self):
+        if self._stream is not None:
+            return
+        device = self._resolve_device()
+        if device is not None:
+            info = sd.query_devices(device)
+            print(f"[audio] 입력 장치: [{device}] {info['name']}")
+        self._stream = sd.InputStream(
+            samplerate=config.SAMPLE_RATE,
+            channels=config.CHANNELS,
+            blocksize=config.BLOCK_SIZE,
+            dtype="float32",
+            callback=self._callback,
+            device=device,
+        )
+        self._stream.start()
+
+    def stop(self):
+        if self._stream is not None:
+            try:
+                self._stream.stop()
+                self._stream.close()
+            except Exception:
+                pass
+            self._stream = None
 
 
 class MicRouter:
