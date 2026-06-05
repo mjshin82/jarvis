@@ -109,6 +109,19 @@ async function main() {
   console.log("navigate broadcast:", nv.includes('"meeting"') ? "OK" : `FAIL (${nv})`);
   navPub.close(); navViewer.close();
 
+  // 10) navigate 는 일시적 명령 — replay 버퍼에 남지 않아 '이후' 접속한 viewer 는 받지 않는다
+  const navPub2 = await open(`${BASE}/publish/${KEY}`, { headers: { Authorization: `Bearer ${RELAY}` } });
+  navPub2.send(JSON.stringify({ kind: "navigate", text: "meeting" }));
+  await new Promise((r) => setTimeout(r, 300));   // broadcast 처리 대기
+  const lateViewer = await open(`${BASE}/subscribe/${KEY}?token=${ADMIN}`);
+  let replayedNav = false;
+  lateViewer.on("message", (d, isBinary) => {
+    if (!isBinary && d.toString().includes('"navigate"')) replayedNav = true;
+  });
+  await new Promise((r) => setTimeout(r, 500));   // replay 수신 대기
+  console.log("navigate replay 미적재:", replayedNav ? "FAIL (late viewer got navigate)" : "OK");
+  navPub2.close(); lateViewer.close();
+
   [recv, send, send2, viewer, viewer2].forEach((w) => w.close());
   process.exit(0);
 }

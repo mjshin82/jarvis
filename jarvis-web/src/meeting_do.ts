@@ -133,6 +133,12 @@ export class MeetingDO {
       }
       return;
     }
+    // navigate: 일시적 명령(상태 아님) — 현재 viewer 에게만 broadcast, replay 버퍼 미적재.
+    // (append 하면 이후 접속한 viewer 가 replay 로 받아 회의가 아닐 때도 /meeting 으로 이동함)
+    if (msg.kind === "navigate") {
+      this.broadcast(this.buildEvent(msg));
+      return;
+    }
     // 그 외: append + broadcast
     this.append(this.buildEvent(msg));
   }
