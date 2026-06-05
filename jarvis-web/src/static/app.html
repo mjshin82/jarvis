@@ -56,6 +56,8 @@
   .bubble { max-width: 80%; padding: 8px 12px; border-radius: 14px; white-space: pre-wrap; line-height: 1.4; }
   .bubble.user { align-self: flex-end; background: var(--accent); color: #fff; }
   .bubble.assistant { align-self: flex-start; background: #8883; }
+  .bubble.draft { opacity: 0.6; }
+  .bubble.draft::after { content: "▍"; margin-left: 2px; animation: blink 1s steps(2, start) infinite; }
 
   /* 회의 자막 */
   #log { flex: 1; padding: 16px; max-width: 980px; margin: 0 auto; width: 100%; }
@@ -164,7 +166,7 @@
     const t = Math.max(audioCtx.currentTime, playHead);
     s.start(t); playHead = t + ab.duration;
   }
-  let lastRole = null, lastBubble = null;
+  let lastRole = null, lastBubble = null, chatDraft = null;
   function addText(role, text) {
     const chat = $("chat");
     if (role === lastRole && lastBubble) { lastBubble.textContent += " " + text; }
@@ -214,7 +216,16 @@
   // ---- 이벤트 디스패치 (홈+회의 통합) ----
   function handle(ev) {
     switch (ev.kind) {
-      case "user": addText("user", ev.text || ""); return;
+      case "user":
+        if (chatDraft) {   // 조합중 버블을 최종으로 확정
+          chatDraft.classList.remove("draft");
+          chatDraft.textContent = ev.text || "";
+          lastRole = "user"; lastBubble = chatDraft; chatDraft = null;
+          $("chat").scrollTop = $("chat").scrollHeight;
+        } else {
+          addText("user", ev.text || "");
+        }
+        return;
       case "assistant": addText("assistant", ev.text || ""); return;
       case "navigate": showView(ev.text); return;
       case "hello": applyMeta(ev.meta); return;
@@ -247,6 +258,16 @@
         break;
       }
       case "partial": {
+        if (document.body.dataset.view !== "meeting") {   // 홈 채팅 조합중 버블
+          if (!chatDraft) {
+            chatDraft = document.createElement("div");
+            chatDraft.className = "bubble user draft";
+            $("chat").appendChild(chatDraft);
+          }
+          chatDraft.textContent = ev.text || "";
+          $("chat").scrollTop = $("chat").scrollHeight;
+          return;
+        }
         if (!draftCard) { draftCard = newCard(); draftCard.classList.add("draft"); }
         draftCard.innerHTML = `<div class="src">🧑 ${escapeHtml(ev.text || "")}</div>`;
         scrollIfLocked();
