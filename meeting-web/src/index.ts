@@ -6,6 +6,9 @@
  *   GET  /m/:key              viewer HTML (정적)
  *   GET  /subscribe/:key      WebSocket: viewer
  *   GET  /publish/:key        WebSocket: publisher (Bearer 토큰 필요)
+ *   GET  /capture/:key        원격 마이크 캡처 HTML (정적)
+ *   GET  /mic/:key            WebSocket: 마이크 송신 (토큰 필요)
+ *   GET  /mic-recv/:key       WebSocket: 마이크 수신=jarvis (토큰 필요)
  *
  * 회의 키별로 MeetingDO (Durable Object) 1 개 인스턴스로 라우팅한다.
  */

@@ -20,6 +20,7 @@ export class MeetingDO {
   private viewers: Set<WebSocket> = new Set();
   private micSender: WebSocket | null = null;
   private micReceiver: WebSocket | null = null;
+  private lastNoReceiverAt = 0;
   private events: RelayEvent[] = [];   // 최근 N개 (deque)
   private seq = 0;
   private meta: MeetingMeta | null = null;
@@ -157,7 +158,11 @@ export class MeetingDO {
     ws.addEventListener("message", (msg) => {
       const data = (msg as MessageEvent).data as string | ArrayBuffer;
       if (!this.micReceiver) {
-        this.safeSend(ws, { ts: Date.now() / 1000, seq: 0, kind: "no_receiver" } as RelayEvent);
+        const now = Date.now();
+        if (now - this.lastNoReceiverAt > 2000) {   // 프레임마다 통지하지 않도록 디바운스
+          this.lastNoReceiverAt = now;
+          this.safeSend(ws, { ts: now / 1000, seq: 0, kind: "no_receiver" } as RelayEvent);
+        }
         return;
       }
       try {
