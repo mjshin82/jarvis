@@ -122,15 +122,16 @@ async function main() {
   console.log("navigate replay 미적재:", replayedNav ? "FAIL (late viewer got navigate)" : "OK");
   navPub2.close(); lateViewer.close();
 
-  // 11) /:name 과 /:name/meeting 가 동일 셸 HTML 반환
+  // 11) /:name 은 SPA(app.html), /:name/meeting 은 공개 뷰어(viewer.html) — 서로 다른 페이지
   const httpBase = BASE.replace(/^ws/, "http");
   const r1 = await fetch(`${httpBase}/Concode`);
   const r2 = await fetch(`${httpBase}/Concode/meeting`);
   const t1 = await r1.text(), t2 = await r2.text();
-  const okShell = r1.status === 200 && r2.status === 200
+  const routesOk = r1.status === 200 && r2.status === 200
     && (r1.headers.get("content-type") || "").includes("text/html")
-    && t1 === t2 && t1.includes("data-view") && t1.includes('id="meeting-view"');
-  console.log("동일 셸 서빙:", okShell ? "OK" : `FAIL (s1=${r1.status} s2=${r2.status} eq=${t1 === t2})`);
+    && t1.includes("data-view") && t1.includes('id="voice-toggle"')   // 홈 = SPA
+    && t2.includes("회의 자막") && !t2.includes('id="voice-toggle"');  // 회의 = 공개 뷰어(입력 없음)
+  console.log("라우트 분리(SPA/공개뷰어):", routesOk ? "OK" : `FAIL (s1=${r1.status} s2=${r2.status})`);
 
   // 12) control 채널: sender(/control) → receiver(/control-recv) forward
   const ctlRecv = await open(`${BASE}/control-recv/${KEY}`, { headers: { Authorization: `Bearer ${RELAY}` } });
