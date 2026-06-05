@@ -57,7 +57,10 @@
     background: var(--accent); color: #fff; font-size: 26px; line-height: 1; cursor: pointer;
   }
   #meeting-stop { height: 48px; border-radius: 24px; background: #dc2626; }
-  #mic-src-toggle { flex: 1; height: 48px; border-radius: 24px; background: #111; color: #fff; }
+  #mic-src-toggle { flex: 1; height: 48px; border-radius: 24px; border: none; cursor: pointer;
+    background: #111; color: #fff; font-size: 15px;
+    display: flex; align-items: center; justify-content: center; gap: 8px; }
+  #mic-src-toggle.active { background: #dc2626; animation: vpulse 1.2s ease-in-out infinite; }
   body[data-view="home"] #meeting-stop,
   body[data-view="home"] #mic-src-toggle { display: none; }
   body[data-view="meeting"] #voice-toggle,
@@ -152,7 +155,15 @@
       <span>음성으로 대화</span>
     </button>
     <button id="dock-plus" aria-label="메뉴">+</button>
-    <button id="mic-src-toggle">🎙 입력: 시스템</button>
+    <button id="mic-src-toggle" aria-label="폰 마이크 입력">
+      <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
+        <rect x="3" y="8" width="2.5" height="6" rx="1.25" fill="currentColor"/>
+        <rect x="7.5" y="5" width="2.5" height="12" rx="1.25" fill="currentColor"/>
+        <rect x="12" y="3" width="2.5" height="16" rx="1.25" fill="currentColor"/>
+        <rect x="16.5" y="7" width="2.5" height="8" rx="1.25" fill="currentColor"/>
+      </svg>
+      <span>폰 마이크</span>
+    </button>
     <button id="meeting-stop">🛑 회의 종료</button>
   </div>
 
@@ -352,7 +363,7 @@
       }
       case "mic_source":
         micSource = ev.source || "system";
-        $("mic-src-toggle").textContent = micSource === "remote" ? "🎙 입력: 폰" : "🎙 입력: 시스템";
+        $("mic-src-toggle").classList.toggle("active", micSource === "remote");   // 붉은=폰
         return;
       default: return;
     }
@@ -478,10 +489,24 @@
     if (!getPw()) { showLogin(); return; }
     sendControl({ kind: "meeting_stop" });
   });
-  // ---- 회의 입력 소스 토글 (본체 ⇄ 폰) ----
-  $("mic-src-toggle").addEventListener("click", () => {
+  // ---- 회의 입력 소스 토글 (검정=시스템 / 붉은=폰 — 폰이면 폰 마이크 즉시 스트리밍) ----
+  $("mic-src-toggle").addEventListener("click", async () => {
     if (!getPw()) { showLogin(); return; }
-    sendControl({ kind: micSource === "remote" ? "mic_system" : "mic_phone" });
+    ensureAudio();
+    if (micSource === "remote") {
+      // 폰 → 시스템: 스트리밍 중단
+      sendControl({ kind: "mic_system" });
+      if (micOn) { micStop(); micOn = false; }
+      micSource = "system";
+      $("mic-src-toggle").classList.remove("active");
+    } else {
+      // 시스템 → 폰: 폰 마이크 스트리밍 시작 후 소스 전환
+      try { if (!micOn) { await micStart(); micOn = true; } }
+      catch (e) { alert("마이크 권한 실패: " + e.message); return; }
+      sendControl({ kind: "mic_phone" });
+      micSource = "remote";
+      $("mic-src-toggle").classList.add("active");
+    }
   });
   // ---- + 기능 메뉴 ----
   $("dock-plus").addEventListener("click", (e) => {
