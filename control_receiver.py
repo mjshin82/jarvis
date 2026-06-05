@@ -41,7 +41,7 @@ class ControlReceiver:
         if kind == "no_receiver":
             self.on_log("[control] relay: 수신자 없음 통지")
         elif kind:
-            await self.on_command(kind)   # meeting_stop·listen_start·listen_stop 등 포워딩
+            await self.on_command(msg)   # 전체 dict 전달(kind + value 등 페이로드)
 
     def start(self):
         if websockets is None:
