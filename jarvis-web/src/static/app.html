@@ -43,6 +43,8 @@
   button.off { background: #dc2626; }
   #mic-level { width: 120px; height: 8px; background: #ddd4; border-radius: 4px; overflow: hidden; }
   #mic-bar { height: 100%; width: 0%; background: #22c55e; }
+  #meeting-stop { display: none; background: #dc2626; }
+  body[data-view="meeting"] #meeting-stop { display: inline-block; }
 
   /* 뷰 토글 */
   #home-view, #meeting-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
@@ -95,6 +97,7 @@
   <div id="controls">
     <button id="mic-toggle">🎙️ 마이크 켜기</button>
     <div id="mic-level" class="hidden"><div id="mic-bar"></div></div>
+    <button id="meeting-stop">🛑 회의 종료</button>
   </div>
 
   <div id="home-view">
@@ -184,7 +187,7 @@
   function applyMeta(meta) {
     if (!meta) return;
     const partner = meta.partner || "?", user = meta.user || "?";
-    $("title").textContent = `🎤 ${partner} ↔ ${user}`;
+    $("title").textContent = partner ? `🎤 ${partner} ↔ ${user}` : "🎤 Meeting";
     const tags = [];
     if (meta.partner_lang) tags.push(`${partner}: ${meta.partner_lang}`);
     if (meta.user_lang) tags.push(`${user}: ${meta.user_lang}`);
@@ -376,6 +379,21 @@
     $("mic-toggle").classList.toggle("off", micOn);
     if (micOn) { try { await micStart(); } catch (e) { alert("마이크 권한 실패: " + e.message); micOn = false; $("mic-toggle").textContent = "🎙️ 마이크 켜기"; $("mic-toggle").classList.remove("off"); } }
     else micStop();
+  });
+
+  // ---- 회의 종료 (웹 → control 채널, one-shot) ----
+  $("meeting-stop").addEventListener("click", () => {
+    const pw = getPw();
+    if (!pw) { showLogin(); return; }
+    const proto = location.protocol === "https:" ? "wss:" : "ws:";
+    try {
+      const cws = new WebSocket(`${proto}//${location.host}/control/${encodeURIComponent(name)}?token=${encodeURIComponent(pw)}`);
+      cws.onopen = () => {
+        try { cws.send(JSON.stringify({ kind: "meeting_stop" })); }
+        finally { setTimeout(() => { try { cws.close(); } catch {} }, 200); }
+      };
+      cws.onerror = () => {};
+    } catch {}
   });
 
   // ---- 초기화 ----

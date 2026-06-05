@@ -73,6 +73,7 @@ async def main():
     # 원격 마이크 (옵션): 웹 프론트가 보내는 외부 마이크 스트림을 relay 역방향으로 수신.
     remote_mic_rx = None
     remote_mic_monitor = None
+    control_rx = None
     if config.REMOTE_MIC_ENABLED and config.RELAY_URL and config.RELAY_TOKEN:
         from remote_mic_receiver import RemoteMicReceiver
         remote_mic_rx = RemoteMicReceiver(
@@ -89,6 +90,20 @@ async def main():
 
         mic.router.on_switch = _on_mic_switch
         remote_mic_monitor = asyncio.create_task(mic.router.run_idle_monitor())
+    # 웹 제어 채널(브라우저 → jarvis): 회의 종료 등 비오디오 명령. REMOTE_MIC 와 독립.
+    if config.RELAY_URL and config.RELAY_TOKEN:
+        from control_receiver import ControlReceiver
+
+        async def _on_remote_command(kind):
+            if kind == "meeting_stop":
+                await stop_meeting()
+
+        control_rx = ControlReceiver(
+            config.RELAY_URL, config.RELAY_TOKEN,
+            on_command=_on_remote_command, on_log=console.log,
+            key=config.ROOM_KEY, connect_timeout=config.RELAY_TIMEOUT_S,
+        )
+        control_rx.start()
     state = "WAITING_WAKE"
     response: asyncio.Task | None = None   # 진행 중 응답 흐름 (텍스트 또는 음성)
     watchdog: asyncio.Task | None = None   # LISTENING 타임아웃
@@ -192,8 +207,6 @@ async def main():
                 web_pub.emit("navigate", "meeting")
         else:  # "stop"
             await stop_meeting()
-            if web_pub is not None:
-                web_pub.emit("navigate", "home")
 
     async def respond_flow_audio(audio):
         """음성 입력 흐름.
@@ -440,6 +453,8 @@ async def main():
             mic.router.set_tap(None)   # 블록을 메인 큐(wake/VAD)로 복귀
             meeting_session["obj"] = None
             console.set_status(None)
+            if web_pub is not None:
+                web_pub.emit("navigate", "home")
             idle()
 
     cmd_ctx["trigger_wake"] = trigger_wake
@@ -546,6 +561,11 @@ async def main():
         if remote_mic_rx is not None:
             try:
                 await remote_mic_rx.close()
+            except Exception:
+                pass
+        if control_rx is not None:
+            try:
+                await control_rx.close()
             except Exception:
                 pass
         try:

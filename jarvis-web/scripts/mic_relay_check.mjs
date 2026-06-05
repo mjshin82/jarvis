@@ -132,6 +132,15 @@ async function main() {
     && t1 === t2 && t1.includes("data-view") && t1.includes('id="meeting-view"');
   console.log("동일 셸 서빙:", okShell ? "OK" : `FAIL (s1=${r1.status} s2=${r2.status} eq=${t1 === t2})`);
 
+  // 12) control 채널: sender(/control) → receiver(/control-recv) forward
+  const ctlRecv = await open(`${BASE}/control-recv/${KEY}`, { headers: { Authorization: `Bearer ${RELAY}` } });
+  const ctlGot = nextMsg(ctlRecv);
+  const ctlSend = await open(`${BASE}/control/${KEY}?token=${ADMIN}`);
+  ctlSend.send(JSON.stringify({ kind: "meeting_stop" }));
+  const cm = await Promise.race([ctlGot, new Promise((_, r) => setTimeout(() => r(new Error("timeout")), 3000))]).catch((e) => fail(e.message));
+  console.log("control forward:", cm.text && cm.text.includes("meeting_stop") ? "OK" : `FAIL (${cm.text})`);
+  ctlSend.close(); ctlRecv.close();
+
   [recv, send, send2, viewer, viewer2].forEach((w) => w.close());
   process.exit(0);
 }
