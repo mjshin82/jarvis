@@ -1,5 +1,6 @@
 """전역 설정. 오디오 포맷은 파이프라인 전체가 공유하므로 한 곳에 모은다."""
 import os
+import re
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -95,12 +96,24 @@ RELAY_URL = os.getenv("RELAY_URL", "")            # ws://localhost:8787 또는 w
 RELAY_TOKEN = os.getenv("RELAY_TOKEN", "")        # meeting-web 의 RELAY_TOKEN 과 일치해야 함
 RELAY_TIMEOUT_S = float(os.getenv("RELAY_TIMEOUT_S", "5"))
 # 원격 마이크 (웹 프론트가 보내는 외부 마이크 스트림). RELAY_URL/RELAY_TOKEN 재사용.
+# 방 key 는 ROOM_KEY(이름 기반) 공용 — 아래 USER_NAME 절 참고.
 REMOTE_MIC_ENABLED = os.getenv("REMOTE_MIC_ENABLED", "false").lower() in ("1", "true", "yes")
-REMOTE_MIC_KEY = os.getenv("REMOTE_MIC_KEY", "jarvis")   # relay 방 key (캡처 페이지와 일치)
 REMOTE_MIC_IDLE_S = float(os.getenv("REMOTE_MIC_IDLE_S", "2.0"))  # 이 시간 무프레임이면 시스템 마이크 복귀
 
-# 사용자(나) 이름 — /meet 메타 입력 시 매번 묻지 않고 .env 에서 가져온다.
+# 사용자(나) 이름 — .env 에서 설정. /meet 자막·원격 마이크의 방 key 출처.
 USER_NAME = os.getenv("USER_NAME", "Concode")
+
+
+def _room_key(name: str, max_len: int = 30) -> str:
+    """이름 → URL/relay-key 안전 문자열. 공백→_, 영숫자/한글만, 길이 제한."""
+    s = re.sub(r"\s+", "_", name.strip())
+    s = re.sub(r"[^0-9A-Za-z가-힣_\-]", "", s)
+    return s[:max_len] or "jarvis"
+
+
+# 회의 자막 + 원격 마이크가 공유하는 단일 방 key (jarvis 1개이므로 이름 기반 고정).
+# 웹은 항상 https://<relay>/m/<ROOM_KEY> 로 접속한다.
+ROOM_KEY = _room_key(USER_NAME)
 
 MEET_CONTEXT = os.getenv("MEET_CONTEXT", (
     "First introductory meeting between a Korean indie game studio (Concode) and a global "
