@@ -25,6 +25,8 @@ class RemoteMicReceiver:
         self.connect_timeout = connect_timeout
         self._stop = asyncio.Event()
         self._task = None
+        self._outbound: asyncio.Queue = asyncio.Queue()
+        self._last_source = None
 
     def _url(self):
         key = quote(self.key or "jarvis", safe="")
@@ -44,6 +46,14 @@ class RemoteMicReceiver:
         elif kind in ("mic_start", "mic_stop"):
             self.on_log(f"[mic] 원격 캡처 {kind}")
 
+    def notify_source(self, source) -> None:
+        """MicRouter.on_switch 로 연결 — 소스 상태를 relay 로 올린다(동기, 큐 적재)."""
+        self._last_source = source
+        try:
+            self._outbound.put_nowait({"kind": "mic_source", "source": source})
+        except asyncio.QueueFull:
+            pass
+
     def start(self):
         if websockets is None:
             self.on_log("[mic] websockets 미설치 — 원격 마이크 비활성")
@@ -59,6 +69,15 @@ class RemoteMicReceiver:
                 await self._task
             except Exception:
                 pass
+
+    async def _send_loop(self, ws) -> None:
+        while True:
+            msg = await self._outbound.get()
+            await ws.send(json.dumps(msg))
+
+    async def _recv_loop(self, ws) -> None:
+        async for message in ws:
+            await self._handle_message(message)
 
     async def _run(self):
         backoff = 0.5
@@ -86,5 +105,15 @@ class RemoteMicReceiver:
             ping_interval=20, ping_timeout=10, open_timeout=self.connect_timeout,
         ) as ws:
             self.on_log("[mic] 원격 마이크 수신 대기 중")
-            async for message in ws:
-                await self._handle_message(message)
+            # (re)연결 직후 현재 소스 1회 동기화 (끊김 사이 전환 복구)
+            if self._last_source is not None:
+                await ws.send(json.dumps({"kind": "mic_source", "source": self._last_source}))
+            recv = asyncio.create_task(self._recv_loop(ws))
+            send = asyncio.create_task(self._send_loop(ws))
+            done, pending = await asyncio.wait({recv, send}, return_when=asyncio.FIRST_COMPLETED)
+            for t in pending:
+                t.cancel()
+            for t in done:
+                exc = t.exception()
+                if exc and not isinstance(exc, asyncio.CancelledError):
+                    raise exc

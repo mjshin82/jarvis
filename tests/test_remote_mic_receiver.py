@@ -31,3 +31,36 @@ def test_recv_url_built_from_base_and_key():
     rx = RemoteMicReceiver("wss://relay.example/", "tok", FakeRouter(),
                            on_log=lambda *_: None, key="room1")
     assert rx._url() == "wss://relay.example/mic-recv/room1"
+
+
+def test_notify_source_caches_and_enqueues():
+    rx = RemoteMicReceiver("ws://x", "tok", FakeRouter(), on_log=lambda *_: None)
+    rx.notify_source("remote")
+    assert rx._last_source == "remote"
+    msg = rx._outbound.get_nowait()
+    assert msg == {"kind": "mic_source", "source": "remote"}
+
+
+def test_send_loop_writes_queued_to_ws():
+    rx = RemoteMicReceiver("ws://x", "tok", FakeRouter(), on_log=lambda *_: None)
+
+    class FakeWS:
+        def __init__(self):
+            self.sent = []
+        async def send(self, data):
+            self.sent.append(data)
+
+    async def main():
+        ws = FakeWS()
+        rx.notify_source("system")
+        task = asyncio.create_task(rx._send_loop(ws))
+        await asyncio.sleep(0.05)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        return ws.sent
+
+    sent = asyncio.run(main())
+    assert any('"kind": "mic_source"' in s and '"source": "system"' in s for s in sent)
