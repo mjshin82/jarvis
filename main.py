@@ -220,9 +220,7 @@ async def main():
         if intent == "meeting":
             if web_pub is not None:
                 web_pub.emit("assistant", "🎤 회의 모드로 전환합니다")
-            await start_meeting_setup()
-            if web_pub is not None:
-                web_pub.emit("navigate", "meeting")
+            await start_meeting_setup()   # navigate("meeting") 는 _begin_meeting 이 발행
         else:  # "stop"
             await stop_meeting()
 
@@ -454,6 +452,7 @@ async def main():
             # 상시 web_pub 으로 자막 중계 (회의 전용 연결을 따로 만들지 않음)
             if web_pub is not None:
                 sess.add_listener(web_pub.emit_async)
+                web_pub.emit("navigate", "meeting")   # 모든 진입 경로(/meet·음성) 가 웹을 회의 뷰로
                 view_base = config.RELAY_URL.replace("wss://", "https://").replace("ws://", "http://")
                 console.log(f"🌐 자막: {view_base}/{meta.key}/meeting")
         except Exception as ex:
