@@ -123,12 +123,20 @@ class MicRouter:
 
     # --- sink (소스가 블록을 흘려보낼 때 호출) ---
     def _sink_local(self, block):
-        if self._active == "local":
-            self._q.put(block)
+        if self._active != "local":
+            return
+        if self._tap is not None:          # 회의 모드: 활성 소스 블록을 우회
+            self._tap(block)
+            return
+        self._q.put(block)
 
     def _sink_remote(self, block):
-        if self._active == "remote":
-            self._q.put(block)
+        if self._active != "remote":
+            return
+        if self._tap is not None:
+            self._tap(block)
+            return
+        self._q.put(block)
 
     # --- 라이프사이클 ---
     def start(self):
@@ -147,10 +155,6 @@ class MicRouter:
 
     # --- 원격 수신 진입점 (RemoteMicReceiver 가 호출) ---
     def on_remote_frame(self, pcm_bytes):
-        if self._tap is not None:
-            # 회의 모드 등 외부 소비자로 raw 프레임 우회 (메인 VAD 큐로 안 감)
-            self._tap(pcm_bytes)
-            return
         if self._suppressed:
             return
         self.note_remote_activity(self._clock())

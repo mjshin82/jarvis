@@ -94,27 +94,33 @@ def test_on_switch_called_with_new_source():
     assert seen == ["remote", "local"]
 
 
-def test_tap_diverts_remote_frames_and_bypasses_queue():
+def test_tap_diverts_active_source_blocks_and_bypasses_queue():
     q = queue.Queue()
     tapped = []
-    fed = []
-
-    class Rem:
-        def feed(self, b): fed.append(b)
-        def reset(self): pass
-
-    r = MicRouter(q, local=_FakeLocal(), remote=Rem())
-    r.set_override("remote")          # tap 없으면 큐로 갈 상황
+    r = MicRouter(q, local=_FakeLocal(), remote=_FakeRemote())
     r.set_tap(tapped.append)
-    r.on_remote_frame(b"\x01\x02")
-    assert tapped == [b"\x01\x02"]    # tap 으로 우회
-    assert fed == []                  # remote.feed 안 탐
-    assert q.empty()                  # 메인 큐 미적재
 
-    r.set_tap(None)                   # 해제 → 기존 경로 복귀
-    r.on_remote_frame(b"\x03\x04")
-    assert tapped == [b"\x01\x02"]    # tap 은 더 안 늘어남
-    assert fed == [b"\x03\x04"]       # remote.feed 로 감
+    # local active → _sink_local 블록이 tap 으로 (큐 미적재)
+    b1 = _block(0.1)
+    r._sink_local(b1)
+    assert tapped == [b1]
+    assert q.empty()
+
+    # remote active → _sink_remote 블록이 tap 으로
+    r.set_override("remote")
+    b2 = _block(0.2)
+    r._sink_remote(b2)
+    assert tapped == [b1, b2]
+    assert q.empty()
+
+    # 비활성 소스 블록은 무시 (active=remote 인데 local sink 호출)
+    r._sink_local(_block(0.9))
+    assert tapped == [b1, b2]
+
+    # tap 해제 → 큐로 복귀
+    r.set_tap(None)
+    r._sink_remote(_block(0.3))
+    assert q.qsize() == 1
 
 
 def test_active_property():
