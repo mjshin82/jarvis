@@ -141,6 +141,22 @@ async function main() {
   console.log("control forward:", cm.text && cm.text.includes("meeting_stop") ? "OK" : `FAIL (${cm.text})`);
   ctlSend.close(); ctlRecv.close();
 
+  // 13) 공개 watch 뷰어: 자막(source)만, 채팅(assistant)·무인증
+  const watchV = await open(`${BASE}/watch/${KEY}`);                 // 무인증 OK
+  const subV = await open(`${BASE}/subscribe/${KEY}?token=${ADMIN}`);
+  const wMsgs = [], sMsgs = [];
+  watchV.on("message", (d, isB) => { if (!isB) wMsgs.push(d.toString()); });
+  subV.on("message", (d, isB) => { if (!isB) sMsgs.push(d.toString()); });
+  const pub3 = await open(`${BASE}/publish/${KEY}`, { headers: { Authorization: `Bearer ${RELAY}` } });
+  pub3.send(JSON.stringify({ kind: "source", text: "공개자막" }));
+  pub3.send(JSON.stringify({ kind: "assistant", text: "사적대화" }));
+  await new Promise((r) => setTimeout(r, 600));
+  const watchOk = wMsgs.some((s) => s.includes('"source"') && s.includes("공개자막")) && !wMsgs.some((s) => s.includes('"assistant"'));
+  const subOk = sMsgs.some((s) => s.includes('"assistant"') && s.includes("사적대화"));
+  console.log("public watch 자막만:", watchOk ? "OK" : `FAIL (${wMsgs.length} msgs)`);
+  console.log("owner subscribe 전체:", subOk ? "OK" : "FAIL");
+  pub3.close(); watchV.close(); subV.close();
+
   [recv, send, send2, viewer, viewer2].forEach((w) => w.close());
   process.exit(0);
 }
