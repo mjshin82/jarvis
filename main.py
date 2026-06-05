@@ -59,14 +59,15 @@ async def main():
             connect_timeout=config.RELAY_TIMEOUT_S,
         )
         remote_mic_rx.start()
+        mic.router.on_switch = remote_mic_rx.notify_source
         remote_mic_monitor = asyncio.create_task(mic.router.run_idle_monitor())
         cap_base = config.RELAY_URL.replace("wss://", "https://").replace("ws://", "http://")
-        cap_url = f"{cap_base}/capture/{config.REMOTE_MIC_KEY}"
+        cap_url = f"{cap_base}/m/{config.REMOTE_MIC_KEY}"
         box_width = max(len(cap_url) + 4, 60)
         border = "─" * box_width
         console.log("")
         console.log(f"┌{border}┐")
-        console.log(f"│  📱 원격 마이크 (이 URL 을 폰/타블렛에서 열기)".ljust(box_width + 1) + "│")
+        console.log(f"│  📱 회의/원격마이크 페이지 (admin 로그인 후 mic 토글)".ljust(box_width + 1) + "│")
         console.log(f"│  {cap_url}".ljust(box_width + 1) + "│")
         console.log(f"└{border}┘")
         console.log("")
