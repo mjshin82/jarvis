@@ -326,7 +326,9 @@
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
     ws = new WebSocket(`${proto}//${location.host}/subscribe/${encodeURIComponent(name)}?token=${encodeURIComponent(pw)}`);
     ws.binaryType = "arraybuffer";
+    let opened = false;
     ws.addEventListener("open", () => {
+      opened = true;
       $("conn").textContent = "● live";
       $("conn").classList.remove("bad"); $("conn").classList.add("ok");
       reconnectDelay = 500;
@@ -336,7 +338,9 @@
       try { handle(JSON.parse(m.data)); } catch (e) { console.error("bad message", e, m.data); }
     });
     ws.addEventListener("close", (e) => {
-      if (e.code === 1006 || e.code === 1008) {
+      // 1008=서버 인증 거부, 또는 한 번도 열리지 않은 1006(업그레이드 401) → 진짜 인증 실패.
+      // 열렸던 소켓의 1006 은 네트워크 끊김(모바일 화면잠금 등) → 자격증명 유지하고 재연결.
+      if (e.code === 1008 || (!opened && e.code === 1006)) {
         localStorage.removeItem(ADMIN_KEY);
         $("conn").textContent = "인증 필요"; $("conn").classList.add("bad");
         showLogin();
@@ -384,10 +388,12 @@
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
     micWS = new WebSocket(`${proto}//${location.host}/mic/${encodeURIComponent(name)}?token=${encodeURIComponent(pw)}`);
     micWS.binaryType = "arraybuffer";
-    micWS.onopen = () => micWS.send(JSON.stringify({ kind: "mic_start" }));
+    let micOpened = false;
+    micWS.onopen = () => { micOpened = true; micWS.send(JSON.stringify({ kind: "mic_start" })); };
     micWS.onmessage = (e) => { try { if (JSON.parse(e.data).kind === "kicked") loseMic("다른 기기가 마이크를 가져갔습니다."); } catch {} };
     micWS.onclose = (e) => {
-      if (e.code === 1006 || e.code === 1008) { localStorage.removeItem(ADMIN_KEY); showLogin(); loseMic("인증 실패 — 다시 로그인하세요."); }
+      // 열렸던 소켓의 1006 은 네트워크 끊김 → 인증 실패로 오인하지 않음(자격증명 유지)
+      if (e.code === 1008 || (!micOpened && e.code === 1006)) { localStorage.removeItem(ADMIN_KEY); showLogin(); loseMic("인증 실패 — 다시 로그인하세요."); }
       else if (micOn) loseMic("마이크 연결이 종료되었습니다.");
     };
     micStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
