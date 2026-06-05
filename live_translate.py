@@ -94,7 +94,7 @@ class MeetingSession:
         self.realtime_model = realtime_model
         self.language = language
         self.recorder = None
-        self._dg = None        # Deepgram 백엔드(설정 시)
+        self._stt = None        # 스트리밍 STT 백엔드(Gladia)
         self._loop = None
         self._final_q: asyncio.Queue[str | None] | None = None
         self._consumer_task: asyncio.Task | None = None
@@ -151,12 +151,12 @@ class MeetingSession:
 
     def feed_block(self, block) -> None:
         """MicRouter tap 이 매 블록 호출 — float32 [-1,1] 16kHz → int16 PCM 으로
-        활성 STT 백엔드(Deepgram/RealtimeSTT)에 주입."""
-        if self._dg is None and self.recorder is None:
+        활성 STT 백엔드(Gladia/RealtimeSTT)에 주입."""
+        if self._stt is None and self.recorder is None:
             return
         pcm16 = (np.clip(block, -1.0, 1.0) * 32767).astype(np.int16).tobytes()
-        if self._dg is not None:
-            self._dg.feed_pcm(pcm16)
+        if self._stt is not None:
+            self._stt.feed_pcm(pcm16)
         else:
             self.recorder.feed_audio(pcm16, 16000)
 
@@ -164,23 +164,23 @@ class MeetingSession:
         self._loop = asyncio.get_running_loop()
         self._final_q = asyncio.Queue()
 
-        # STT 백엔드: 설정 Deepgram(+키) 우선, 실패/미설정 시 RealtimeSTT 폴백
-        if settings.get("stt_backend") == "deepgram" and config.DEEPGRAM_API_KEY:
-            from deepgram_stt import DeepgramSTT
+        # STT 백엔드: 설정 Gladia(+키) 우선, 실패/미설정 시 RealtimeSTT 폴백
+        if settings.get("stt_backend") == "gladia" and config.GLADIA_API_KEY:
+            from gladia_stt import GladiaSTT
             try:
-                self._dg = DeepgramSTT(
-                    config.DEEPGRAM_API_KEY,
-                    model=config.MEET_DEEPGRAM_MODEL, language=config.MEET_DEEPGRAM_LANGUAGE,
-                    on_partial=self._dg_partial, on_final=self._dg_final, on_log=self.log,
+                langs = [s.strip() for s in config.MEET_GLADIA_LANGUAGES.split(",") if s.strip()]
+                self._stt = GladiaSTT(
+                    config.GLADIA_API_KEY, model=config.MEET_GLADIA_MODEL, languages=langs,
+                    on_partial=self._stt_partial, on_final=self._stt_final, on_log=self.log,
                 )
-                await self._dg.start()
+                await self._stt.start()
                 self.recorder = None
-                self.log(f"🎤 회의 STT: Deepgram ({config.MEET_DEEPGRAM_MODEL}, {config.MEET_DEEPGRAM_LANGUAGE})")
+                self.log(f"🎤 회의 STT: Gladia ({config.MEET_GLADIA_MODEL}, {config.MEET_GLADIA_LANGUAGES})")
             except Exception as e:
-                self._dg = None
-                self.log(f"Deepgram 연결 실패 — 로컬 STT 폴백: {e}")
+                self._stt = None
+                self.log(f"Gladia 연결 실패 — 로컬 STT 폴백: {e}")
 
-        if self._dg is None:
+        if self._stt is None:
             from RealtimeSTT import AudioToTextRecorder   # 회의 진입 시에만 import
             wb_prompt = wordbook.load_initial_prompt(path=wordbook.MEET_PATH)
             rec_kwargs = dict(
@@ -221,12 +221,12 @@ class MeetingSession:
             except Exception:
                 pass
             self.recorder = None
-        if self._dg is not None:
+        if self._stt is not None:
             try:
-                await self._dg.close()
+                await self._stt.close()
             except Exception:
                 pass
-            self._dg = None
+            self._stt = None
         if self._final_q is not None:
             await self._final_q.put(None)
         if self._consumer_task and not self._consumer_task.done():
@@ -246,8 +246,8 @@ class MeetingSession:
 
     # --- 내부 ---
 
-    def _dg_partial(self, text: str) -> None:
-        """Deepgram interim — 메인 루프에서 직접 호출(threadsafe 불요)."""
+    def _stt_partial(self, text: str) -> None:
+        """스트리밍 STT interim — 메인 루프에서 직접 호출(threadsafe 불요)."""
         text = (text or "").strip()
         if not text or text == self._partial_last:
             return
@@ -255,8 +255,8 @@ class MeetingSession:
         self._emit("partial", text)
         self.set_status(f"📝 {text[:80]}")
 
-    def _dg_final(self, text: str) -> None:
-        """Deepgram 발화 종료 — 기존 final 큐로(→ source + 번역)."""
+    def _stt_final(self, text: str) -> None:
+        """스트리밍 STT 발화 종료 — 기존 final 큐로(→ source + 번역)."""
         if self._final_q is not None:
             self._final_q.put_nowait((text or "").strip())
 

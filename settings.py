@@ -8,11 +8,11 @@ PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "setting.yaml")
 
 DEFAULTS = {
     "translate_backend": "deepseek",   # deepseek | local
-    "stt_backend": "deepgram",         # deepgram | local
+    "stt_backend": "gladia",           # gladia | local
 }
 ALLOWED = {
     "translate_backend": {"deepseek", "local"},
-    "stt_backend": {"deepgram", "local"},
+    "stt_backend": {"gladia", "local"},
 }
 
 _current = dict(DEFAULTS)
