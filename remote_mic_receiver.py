@@ -47,10 +47,12 @@ class RemoteMicReceiver:
             self.on_log(f"[mic] 원격 캡처 {kind}")
 
     def notify_source(self, source) -> None:
-        """MicRouter.on_switch 로 연결 — 소스 상태를 relay 로 올린다(동기, 큐 적재)."""
-        self._last_source = source
+        """MicRouter.on_switch 로 연결 — 소스 상태를 relay 로 올린다(동기, 큐 적재).
+        MicRouter 내부 어휘(local/remote)를 웹 계약(system/remote)으로 정규화한다."""
+        web_source = "system" if source == "local" else source
+        self._last_source = web_source
         try:
-            self._outbound.put_nowait({"kind": "mic_source", "source": source})
+            self._outbound.put_nowait({"kind": "mic_source", "source": web_source})
         except asyncio.QueueFull:
             pass
 

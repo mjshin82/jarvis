@@ -64,3 +64,10 @@ def test_send_loop_writes_queued_to_ws():
 
     sent = asyncio.run(main())
     assert any('"kind": "mic_source"' in s and '"source": "system"' in s for s in sent)
+
+
+def test_notify_source_normalizes_local_to_system():
+    rx = RemoteMicReceiver("ws://x", "tok", FakeRouter(), on_log=lambda *_: None)
+    rx.notify_source("local")
+    assert rx._last_source == "system"
+    assert rx._outbound.get_nowait() == {"kind": "mic_source", "source": "system"}
