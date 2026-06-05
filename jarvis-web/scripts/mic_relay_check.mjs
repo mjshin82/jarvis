@@ -73,6 +73,28 @@ async function main() {
   console.log("subscribe admin 통과:", "OK");
   sub.close();
 
+  // 8) publisher(=jarvis) 가 보낸 binary(TTS) 를 viewer 가 받는다
+  const pub = await open(`${BASE}/publish/${KEY}`, { headers: { Authorization: `Bearer ${RELAY}` } });
+  const pubViewer = await open(`${BASE}/subscribe/${KEY}?token=${ADMIN}`);
+  // 접속 직후 JSON sync/replay 이벤트가 먼저 올 수 있으므로 binary 프레임만 기다린다
+  const gotAudio = (async () => {
+    for (;;) {
+      const m = await nextMsg(pubViewer);
+      if (m.isBinary) return m;
+    }
+  })();
+  const audioFrame = Buffer.concat([
+    Buffer.from(Uint32Array.of(16000).buffer),
+    Buffer.from(Int16Array.of(1, 2, 3).buffer),
+  ]);
+  pub.send(audioFrame);
+  const a = await Promise.race([
+    gotAudio,
+    new Promise((_, r) => setTimeout(() => r(new Error("timeout")), 3000)),
+  ]).catch((e) => fail(e.message));
+  console.log("publisher→viewer 오디오 binary:", a.isBinary ? "OK" : "FAIL");
+  pub.close(); pubViewer.close();
+
   [recv, send, send2, viewer, viewer2].forEach((w) => w.close());
   process.exit(0);
 }
