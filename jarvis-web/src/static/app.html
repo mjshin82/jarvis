@@ -74,6 +74,16 @@
   }
   #plus-menu.hidden { display: none; }
   #plus-menu button { background: var(--card); color: var(--fg); text-align: left; white-space: nowrap; }
+  #settings-modal { position: fixed; inset: 0; background: #0008; z-index: 25;
+    display: flex; align-items: center; justify-content: center; }
+  #settings-modal.hidden { display: none; }
+  #settings-modal .sheet { background: var(--bg); color: var(--fg); border: 1px solid var(--border);
+    border-radius: 14px; padding: 16px; width: min(92vw, 360px); }
+  #settings-modal .sheet-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  #settings-modal .sheet-head button { background: transparent; color: var(--fg); padding: 4px 8px; }
+  #settings-modal .sheet-row { margin: 12px 0; }
+  #settings-modal .sheet-label { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  #settings-modal label { margin-right: 16px; font-size: 15px; cursor: pointer; }
   #sound-hint { position: fixed; top: 60px; left: 50%; transform: translateX(-50%); z-index: 30;
     background: var(--accent); color: #fff; padding: 8px 16px; border-radius: 999px; font-size: 14px;
     cursor: pointer; box-shadow: 0 2px 10px #0005; }
@@ -143,6 +153,22 @@
 
   <div id="plus-menu" class="hidden">
     <button id="menu-meet">🎤 미팅모드</button>
+    <button id="menu-settings">⚙️ 설정</button>
+  </div>
+  <div id="settings-modal" class="hidden">
+    <div class="sheet">
+      <div class="sheet-head"><b>설정</b><button id="settings-close">✕</button></div>
+      <div class="sheet-row">
+        <div class="sheet-label">미팅 번역</div>
+        <label><input type="radio" name="set-translate" value="deepseek"> 딥시크</label>
+        <label><input type="radio" name="set-translate" value="local"> 로컬</label>
+      </div>
+      <div class="sheet-row">
+        <div class="sheet-label">미팅 STT</div>
+        <label><input type="radio" name="set-stt" value="deepgram"> Deepgram</label>
+        <label><input type="radio" name="set-stt" value="local"> 로컬</label>
+      </div>
+    </div>
   </div>
   <div id="dock">
     <button id="voice-toggle" aria-label="음성 대화">
@@ -361,6 +387,9 @@
         $("conn").classList.remove("ok"); $("conn").classList.add("bad");
         return;
       }
+      case "settings":
+        try { fillSettings(JSON.parse(ev.text || "{}")); } catch {}
+        return;
       case "mic_source":
         micSource = ev.source || "system";
         $("mic-src-toggle").classList.toggle("active", micSource === "remote");   // 붉은=폰
@@ -518,6 +547,27 @@
     sendControl({ kind: "meeting_start" });
     $("plus-menu").classList.add("hidden");
   });
+  // ---- 설정 모달 ----
+  function fillSettings(s) {
+    document.querySelectorAll('input[name="set-translate"]').forEach((r) => { r.checked = (r.value === s.translate_backend); });
+    document.querySelectorAll('input[name="set-stt"]').forEach((r) => { r.checked = (r.value === s.stt_backend); });
+  }
+  function curSettings() {
+    const t = document.querySelector('input[name="set-translate"]:checked');
+    const s = document.querySelector('input[name="set-stt"]:checked');
+    return { translate_backend: t ? t.value : "deepseek", stt_backend: s ? s.value : "deepgram" };
+  }
+  $("menu-settings").addEventListener("click", () => {
+    $("plus-menu").classList.add("hidden");
+    if (!getPw()) { showLogin(); return; }
+    $("settings-modal").classList.remove("hidden");
+    sendControl({ kind: "get_settings" });
+  });
+  $("settings-close").addEventListener("click", () => $("settings-modal").classList.add("hidden"));
+  $("settings-modal").addEventListener("click", (e) => { if (e.target === $("settings-modal")) $("settings-modal").classList.add("hidden"); });
+  document.querySelectorAll('#settings-modal input[type="radio"]').forEach((r) =>
+    r.addEventListener("change", () => sendControl({ kind: "apply_settings", value: curSettings() }))
+  );
   document.addEventListener("click", (e) => {
     const menu = $("plus-menu");
     if (!menu.classList.contains("hidden") && !menu.contains(e.target) && e.target !== $("dock-plus")) {
