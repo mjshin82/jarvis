@@ -90,6 +90,7 @@ export class MeetingDO {
       }
     }
     this.publisher = ws;
+    this.notifyViewerCount();   // 재연결한 publisher 에게 현재 owner 수 동기화
 
     ws.addEventListener("message", (msg) => {
       const data = (msg as MessageEvent).data;
@@ -161,8 +162,17 @@ export class MeetingDO {
 
   // --- viewer ---
 
+  // owner 뷰어 수를 publisher(jarvis)에게 통지 → TTS 웹/로컬 라우팅 결정에 사용
+  private notifyViewerCount(): void {
+    if (!this.publisher) return;
+    let count = 0;
+    for (const role of this.viewers.values()) if (role === "owner") count += 1;
+    this.safeSend(this.publisher, this.buildEvent({ kind: "viewers", count }));
+  }
+
   private attachViewer(ws: WebSocket, role: "owner" | "public"): void {
     this.viewers.set(ws, role);
+    this.notifyViewerCount();
     // replay 는 owner 만 (public = 라이브만, 과거 자막 미노출)
     if (role === "owner") {
       for (const ev of this.events) {
@@ -174,9 +184,11 @@ export class MeetingDO {
     }
     ws.addEventListener("close", () => {
       this.viewers.delete(ws);
+      this.notifyViewerCount();
     });
     ws.addEventListener("error", () => {
       this.viewers.delete(ws);
+      this.notifyViewerCount();
     });
   }
 

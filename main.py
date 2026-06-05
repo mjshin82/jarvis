@@ -190,7 +190,7 @@ async def main():
                 if web_pub is not None:
                     web_pub.emit("assistant", sentence)
                 wav, sr = await tts.synth(sentence)
-                if web_pub is not None and mic.router.active == "remote":
+                if web_pub is not None and web_pub.web_viewer_count > 0:
                     pcm16 = (np.clip(wav, -1.0, 1.0) * 32767).astype(np.int16).tobytes()
                     web_pub.emit_audio(pcm16, sr)
                     dur = len(wav) / float(sr)

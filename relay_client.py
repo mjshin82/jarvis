@@ -44,6 +44,7 @@ class RelayClient:
         self._stop = asyncio.Event()
         self._ws = None
         self._connected = asyncio.Event()   # 한 번이라도 연결되면 set
+        self.web_viewer_count = 0   # DO 가 통지한 owner 뷰어 수 (TTS 라우팅용)
 
     # --- public API ---
 
@@ -154,6 +155,38 @@ class RelayClient:
         else:
             await ws.send(json.dumps(item, ensure_ascii=False))
 
+    def _handle_inbound(self, raw) -> None:
+        """DO → publisher 인바운드. 현재는 {kind:"viewers", count} 만 처리."""
+        if isinstance(raw, (bytes, bytearray)):
+            return
+        try:
+            m = json.loads(raw)
+        except Exception:
+            return
+        if m.get("kind") == "viewers":
+            self.web_viewer_count = int(m.get("count") or 0)
+
+    async def _send_loop(self, ws) -> None:
+        while not self._stop.is_set():
+            try:
+                msg = await asyncio.wait_for(self._queue.get(), timeout=1.0)
+            except asyncio.TimeoutError:
+                continue
+            try:
+                await self._send_item(ws, msg)
+            except ConnectionClosed:
+                try:
+                    self._queue.put_nowait(msg)
+                except asyncio.QueueFull:
+                    pass
+                raise
+            if not isinstance(msg, (bytes, bytearray)) and msg.get("kind") == "end":
+                return   # end 송신 후 깔끔 종료
+
+    async def _recv_loop(self, ws) -> None:
+        async for raw in ws:
+            self._handle_inbound(raw)
+
     async def _connect_once(self) -> None:
         url = self._publish_url()
         headers = {"Authorization": f"Bearer {self.token}"}
@@ -162,26 +195,26 @@ class RelayClient:
             open_timeout=self.connect_timeout,
         ) as ws:
             self._ws = ws
-            # 1) 매 연결마다 hello 재송신 (재연결 시 새 publisher 로 인수됨)
+            # 매 연결마다 hello 재송신 (재연결 시 새 publisher 로 인수됨)
             await ws.send(json.dumps(self._hello_payload(), ensure_ascii=False))
             self._connected.set()
-            # 2) 큐 소비
-            while not self._stop.is_set():
-                try:
-                    msg = await asyncio.wait_for(self._queue.get(), timeout=1.0)
-                except asyncio.TimeoutError:
-                    continue
-                try:
-                    await self._send_item(ws, msg)
-                except ConnectionClosed:
-                    # 큐에 다시 넣고 바깥 _run 에서 재연결
+            send = asyncio.create_task(self._send_loop(ws))
+            recv = asyncio.create_task(self._recv_loop(ws))
+            try:
+                done, pending = await asyncio.wait({send, recv}, return_when=asyncio.FIRST_COMPLETED)
+            finally:
+                for t in (send, recv):
+                    if not t.done():
+                        t.cancel()
+                for t in (send, recv):
                     try:
-                        self._queue.put_nowait(msg)
-                    except asyncio.QueueFull:
+                        await t
+                    except (asyncio.CancelledError, Exception):
                         pass
-                    raise
-                if not isinstance(msg, (bytes, bytearray)) and msg.get("kind") == "end":
-                    # end 송신 후 깔끔 종료
-                    return
-            # stop signal: 큐에 남은 거 더 보낼 필요 없음
-            return
+            self.web_viewer_count = 0   # 끊기면 다음 연결까지 모름 → 보수적으로 0(로컬)
+            for t in done:
+                if t.cancelled():
+                    continue
+                exc = t.exception()
+                if exc and not isinstance(exc, asyncio.CancelledError):
+                    raise exc

@@ -40,3 +40,29 @@ def test_send_item_routes_bytes_vs_json():
     asyncio.run(main())
     assert sent[0] == '{"kind": "user", "text": "hi"}'
     assert isinstance(sent[1], (bytes, bytearray)) and sent[1][:4] == struct.pack("<I", 16000)
+
+
+class _Meta:
+    key = "k"
+
+
+def _rc_meta():
+    return RelayClient("ws://x", "tok", _Meta(), on_log=lambda *a: None)
+
+
+def test_handle_inbound_updates_count():
+    rc = _rc_meta()
+    assert rc.web_viewer_count == 0
+    rc._handle_inbound('{"kind":"viewers","count":3}')
+    assert rc.web_viewer_count == 3
+    rc._handle_inbound('{"kind":"viewers","count":0}')
+    assert rc.web_viewer_count == 0
+
+
+def test_handle_inbound_ignores_others():
+    rc = _rc_meta()
+    rc._handle_inbound('{"kind":"viewers","count":2}')
+    rc._handle_inbound('{"kind":"something"}')   # 무시 — 유지
+    rc._handle_inbound("not json")               # 안전
+    rc._handle_inbound(b"\x00\x01")              # bytes 무시
+    assert rc.web_viewer_count == 2
