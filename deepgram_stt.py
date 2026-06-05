@@ -10,9 +10,10 @@ except Exception:  # pragma: no cover
 
 
 class DeepgramSTT:
-    def __init__(self, api_key, *, language="", on_partial, on_final, on_log=print,
+    def __init__(self, api_key, *, model="nova-2", language="", on_partial, on_final, on_log=print,
                  connect_timeout=5.0):
         self.api_key = api_key
+        self.model = model or "nova-2"
         self.language = language or "multi"   # 한↔영 코드스위칭
         self.on_partial = on_partial
         self.on_final = on_final
@@ -95,7 +96,7 @@ class DeepgramSTT:
 
     async def _connect_once(self):
         async with self._client.listen.v1.connect(
-            model="nova-3",
+            model=self.model,
             language=self.language,
             encoding="linear16",
             sample_rate=16000,
@@ -105,7 +106,7 @@ class DeepgramSTT:
             endpointing=300,
         ) as conn:
             self._connected.set()
-            self.on_log(f"[deepgram] 연결됨 (nova-3, {self.language})")
+            self.on_log(f"[deepgram] 연결됨 ({self.model}, {self.language})")
             send = asyncio.create_task(self._send_loop(conn))
             recv = asyncio.create_task(self._recv_loop(conn))
             try:

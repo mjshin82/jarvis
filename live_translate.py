@@ -169,12 +169,13 @@ class MeetingSession:
             from deepgram_stt import DeepgramSTT
             try:
                 self._dg = DeepgramSTT(
-                    config.DEEPGRAM_API_KEY, language=self.language,
+                    config.DEEPGRAM_API_KEY,
+                    model=config.MEET_DEEPGRAM_MODEL, language=config.MEET_DEEPGRAM_LANGUAGE,
                     on_partial=self._dg_partial, on_final=self._dg_final, on_log=self.log,
                 )
                 await self._dg.start()
                 self.recorder = None
-                self.log("🎤 회의 STT: Deepgram (nova-3, multi)")
+                self.log(f"🎤 회의 STT: Deepgram ({config.MEET_DEEPGRAM_MODEL}, {config.MEET_DEEPGRAM_LANGUAGE})")
             except Exception as e:
                 self._dg = None
                 self.log(f"Deepgram 연결 실패 — 로컬 STT 폴백: {e}")

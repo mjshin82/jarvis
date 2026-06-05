@@ -48,6 +48,10 @@ MOCK_MESSAGE = "AI를 통한 응답은 현재 mock처리됩니다."
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
 DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY", "")
+# 미팅 Deepgram STT 모델/언어 (.env 로 조절). 한국어가 multi 에서 부정확하면
+# MEET_DEEPGRAM_LANGUAGE=ko 로 고정 가능(대신 상대 영어는 한글로 오인식될 수 있음).
+MEET_DEEPGRAM_MODEL = os.getenv("MEET_DEEPGRAM_MODEL", "nova-2")
+MEET_DEEPGRAM_LANGUAGE = os.getenv("MEET_DEEPGRAM_LANGUAGE", "multi")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 
 # local: Ollama. 서버 실행 `ollama serve`, 모델 준비 `ollama pull gemma4:e4b`
