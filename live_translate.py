@@ -109,7 +109,7 @@ class MeetingSession:
 
     def __init__(self, *, log, set_status, llm,
                  meta: MeetingMeta | None = None,
-                 model: str = "small", realtime_model: str = "tiny",
+                 model: str = "large-v3-turbo", realtime_model: str = "small",
                  language: str = ""):
         self.log = log
         self.set_status = set_status
