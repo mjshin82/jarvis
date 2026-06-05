@@ -116,6 +116,7 @@ class MicRouter:
         self._active = "local"
         self._last_remote = 0.0
         self._suppressed = False   # 회의 모드 등에서 원격 프레임 처리 일시 중단
+        self._tap = None   # 설정되면 원격 raw 프레임을 여기로 우회(회의 모드 등)
         self.on_switch = on_switch   # 소스 전환 시 호출(source: str). 나중에 주입 가능.
         self.local = local if local is not None else LocalMicSource(sink=self._sink_local)
         self.remote = remote if remote is not None else RemoteMicSource(sink=self._sink_remote)
@@ -146,10 +147,22 @@ class MicRouter:
 
     # --- 원격 수신 진입점 (RemoteMicReceiver 가 호출) ---
     def on_remote_frame(self, pcm_bytes):
+        if self._tap is not None:
+            # 회의 모드 등 외부 소비자로 raw 프레임 우회 (메인 VAD 큐로 안 감)
+            self._tap(pcm_bytes)
+            return
         if self._suppressed:
             return
         self.note_remote_activity(self._clock())
         self.remote.feed(pcm_bytes)
+
+    def set_tap(self, fn):
+        """원격 raw 프레임을 외부 소비자로 우회. None 으로 해제(기존 경로 복귀)."""
+        self._tap = fn
+
+    @property
+    def active(self):
+        return self._active
 
     # --- 전환 로직 ---
     def note_remote_activity(self, now):

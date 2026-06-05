@@ -92,3 +92,34 @@ def test_on_switch_called_with_new_source():
     r.set_override("local")                # remote→local
     r.set_override("local")                # 변화 없음 → 콜백 없음
     assert seen == ["remote", "local"]
+
+
+def test_tap_diverts_remote_frames_and_bypasses_queue():
+    q = queue.Queue()
+    tapped = []
+    fed = []
+
+    class Rem:
+        def feed(self, b): fed.append(b)
+        def reset(self): pass
+
+    r = MicRouter(q, local=_FakeLocal(), remote=Rem())
+    r.set_override("remote")          # tap 없으면 큐로 갈 상황
+    r.set_tap(tapped.append)
+    r.on_remote_frame(b"\x01\x02")
+    assert tapped == [b"\x01\x02"]    # tap 으로 우회
+    assert fed == []                  # remote.feed 안 탐
+    assert q.empty()                  # 메인 큐 미적재
+
+    r.set_tap(None)                   # 해제 → 기존 경로 복귀
+    r.on_remote_frame(b"\x03\x04")
+    assert tapped == [b"\x01\x02"]    # tap 은 더 안 늘어남
+    assert fed == [b"\x03\x04"]       # remote.feed 로 감
+
+
+def test_active_property():
+    q = queue.Queue()
+    r = MicRouter(q, local=_FakeLocal(), remote=_FakeRemote())
+    assert r.active == "local"
+    r.set_override("remote")
+    assert r.active == "remote"
