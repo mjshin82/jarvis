@@ -7,7 +7,6 @@ import asyncio
 import queue
 
 import numpy as np
-import sounddevice as sd
 from silero_vad import load_silero_vad, VADIterator
 
 import config
@@ -16,90 +15,48 @@ from simulation import MODE
 
 class Microphone:
     """마이크 입력 + VAD + wake.
-    pause()/resume() 으로 sd.InputStream 을 닫고 다시 열 수 있다 — 다른 STT 라이브러리
-    (예: RealtimeSTT) 가 마이크를 점유해야 하는 회의 모드 진입 시 사용."""
+    pause()/resume() 으로 시스템 마이크 stream 을 닫고 다시 열 수 있다 — 다른 STT
+    라이브러리(예: RealtimeSTT) 가 마이크를 점유해야 하는 회의 모드 진입 시 사용."""
 
-    def __init__(self):
-        self._vad_model = load_silero_vad()
+    def __init__(self, *, vad_default=None, vad_translate=None):
         self._paused = False
-        self._stream = None     # 현재 활성 InputStream (events() 안에서 관리)
-        # 모드별로 침묵 임계가 다르다 — 평상시는 빠른 응답, 번역은 긴 문장 묶음.
-        # VADIterator 는 init 후 임계 변경이 안 되므로 두 개를 들고 발화 시작 직전에 고름.
-        self._vad_default = VADIterator(
-            self._vad_model,
-            threshold=config.VAD_THRESHOLD,
-            sampling_rate=config.SAMPLE_RATE,
-            min_silence_duration_ms=config.SILENCE_MS,
-        )
-        self._vad_translate = VADIterator(
-            self._vad_model,
-            threshold=config.VAD_THRESHOLD,
-            sampling_rate=config.SAMPLE_RATE,
-            min_silence_duration_ms=config.SILENCE_MS_TRANSLATE,
-        )
-        self._vad = self._vad_default
         self._blocks: queue.Queue = queue.Queue()
+        from mic_source import MicRouter
+        self.router = MicRouter(self._blocks)
+        # VAD 주입(테스트) 또는 기본 생성. 모드별 침묵 임계가 다르다 — 평상시는 빠른
+        # 응답, 번역은 긴 문장 묶음. VADIterator 는 init 후 임계 변경 불가라 두 개를 든다.
+        if vad_default is None or vad_translate is None:
+            self._vad_model = load_silero_vad()
+        if vad_default is None:
+            vad_default = VADIterator(
+                self._vad_model, threshold=config.VAD_THRESHOLD,
+                sampling_rate=config.SAMPLE_RATE,
+                min_silence_duration_ms=config.SILENCE_MS,
+            )
+        if vad_translate is None:
+            vad_translate = VADIterator(
+                self._vad_model, threshold=config.VAD_THRESHOLD,
+                sampling_rate=config.SAMPLE_RATE,
+                min_silence_duration_ms=config.SILENCE_MS_TRANSLATE,
+            )
+        self._vad_default = vad_default
+        self._vad_translate = vad_translate
+        self._vad = self._vad_default
 
     def _pick_vad(self):
         """현재 모드에 맞는 VAD 인스턴스를 돌려준다.
         호출 시점에 결정 — 발화 진행 중에는 바꾸지 않는다(컨텍스트 깨짐)."""
         return self._vad_translate if MODE.is_translate() else self._vad_default
 
-    def _resolve_device(self):
-        """MIC_DEVICE 환경변수 우선. 비었으면 입력 채널 있는 첫 번째 물리 마이크 자동 선택
-        (BlackHole 같은 가상장치 회피)."""
-        spec = config.MIC_DEVICE.strip()
-        if spec:
-            if spec.isdigit():
-                return int(spec)
-            for i, d in enumerate(sd.query_devices()):
-                if d["max_input_channels"] > 0 and spec.lower() in d["name"].lower():
-                    return i
-            print(f"[audio] MIC_DEVICE='{spec}' 매칭 실패 → 기본 장치 사용")
-            return None
-        # 자동: BlackHole/Loopback/Aggregate 같은 가상장치는 건너뛰기
-        skip = ("blackhole", "loopback", "aggregate", "teams", "soundflower")
-        for i, d in enumerate(sd.query_devices()):
-            if d["max_input_channels"] <= 0:
-                continue
-            if any(s in d["name"].lower() for s in skip):
-                continue
-            return i
-        return None
-
-    def _callback(self, indata, frames, time_info, status):
-        # sounddevice 가 오디오 스레드에서 호출. 복사해서 큐에 적재만 한다.
-        if status:
-            print(f"[audio] {status}")
-        self._blocks.put(indata[:, 0].copy())
-
     def pause(self) -> None:
-        """마이크 stream 을 닫는다 → 다른 라이브러리가 마이크를 점유 가능.
-        events() 루프는 큐에서 블록이 안 와 자연스럽게 멈춰 있다가 resume() 후 재개."""
+        """시스템 마이크 stream 을 닫는다 → 다른 라이브러리(회의 모드 RealtimeSTT 등)가
+        장치를 점유 가능. events() 루프는 큐에 블록이 안 와 자연히 멈춰 있다가 resume() 후 재개."""
         self._paused = True
-        if self._stream is not None:
-            try:
-                self._stream.stop()
-                self._stream.close()
-            except Exception:
-                pass
-            self._stream = None
+        self.router.pause_local()
 
     def resume(self) -> None:
-        """마이크 stream 을 다시 연다."""
-        if self._stream is not None:   # 이미 열림
-            self._paused = False
-            return
-        device = self._resolve_device()
-        self._stream = sd.InputStream(
-            samplerate=config.SAMPLE_RATE,
-            channels=config.CHANNELS,
-            blocksize=config.BLOCK_SIZE,
-            dtype="float32",
-            callback=self._callback,
-            device=device,
-        )
-        self._stream.start()
+        """시스템 마이크 stream 을 다시 연다."""
+        self.router.resume_local()
         self._paused = False
 
     async def events(self, wake_detect=None, is_speaking=lambda: False):
@@ -116,19 +73,7 @@ class Microphone:
           되먹임되어 발화로 잡히는 것을 방지. (호출어 감지는 그대로 유지)
         """
         loop = asyncio.get_running_loop()
-        device = self._resolve_device()
-        if device is not None:
-            info = sd.query_devices(device)
-            print(f"[audio] 입력 장치: [{device}] {info['name']}")
-        self._stream = sd.InputStream(
-            samplerate=config.SAMPLE_RATE,
-            channels=config.CHANNELS,
-            blocksize=config.BLOCK_SIZE,
-            dtype="float32",
-            callback=self._callback,
-            device=device,
-        )
-        self._stream.start()
+        self.router.start()
         # 발화 시작 *직전* 의 짧은 audio 도 잡아두면 첫 음절 잘림이 줄어든다.
         pre_roll_max = 6
         pre_roll: list[np.ndarray] = []
@@ -205,10 +150,4 @@ class Microphone:
                     yield ("utterance", np.concatenate(buffer))
                     pre_roll = []   # 발화 종료 후 새로 채워나감
         finally:
-            if self._stream is not None:
-                try:
-                    self._stream.stop()
-                    self._stream.close()
-                except Exception:
-                    pass
-                self._stream = None
+            self.router.stop()
