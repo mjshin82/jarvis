@@ -15,8 +15,7 @@
 import { Hono } from "hono";
 import { MeetingDO } from "./meeting_do";
 // HTML 을 텍스트로 번들. wrangler 가 esbuild loader 로 처리.
-import MEETING_HTML from "./static/meeting.html";
-import HOME_HTML from "./static/home.html";
+import APP_HTML from "./static/app.html";
 
 export { MeetingDO };
 
@@ -64,13 +63,13 @@ app.get("/mic-recv/:key", async (c) => {
 });
 
 app.get("/:name/meeting", (c) => {
-  return new Response(MEETING_HTML, {
+  return new Response(APP_HTML, {
     headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
   });
 });
 
 app.get("/:name", (c) => {
-  return new Response(HOME_HTML, {
+  return new Response(APP_HTML, {
     headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
   });
 });
