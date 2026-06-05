@@ -247,6 +247,10 @@
         badge.classList.toggle("remote", ev.source === "remote");
         break;
       }
+      case "navigate": {
+        if (ev.text === "home") location.href = "/" + encodeURIComponent(key);
+        break;
+      }
       default:
         return;
     }
