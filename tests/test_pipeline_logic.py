@@ -67,6 +67,7 @@ async def collect(mic, script, wake_block=None, speaking=False, expect=2):
         await asyncio.wait_for(task, timeout=3)
     except asyncio.TimeoutError:
         task.cancel()
+        raise AssertionError(f"events 수집 타임아웃 — 수집된 이벤트: {out}")
     return out
 
 

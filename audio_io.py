@@ -10,6 +10,7 @@ import numpy as np
 from silero_vad import load_silero_vad, VADIterator
 
 import config
+from mic_source import MicRouter
 from simulation import MODE
 
 
@@ -21,7 +22,6 @@ class Microphone:
     def __init__(self, *, vad_default=None, vad_translate=None):
         self._paused = False
         self._blocks: queue.Queue = queue.Queue()
-        from mic_source import MicRouter
         self.router = MicRouter(self._blocks)
         # VAD 주입(테스트) 또는 기본 생성. 모드별 침묵 임계가 다르다 — 평상시는 빠른
         # 응답, 번역은 긴 문장 묶음. VADIterator 는 init 후 임계 변경 불가라 두 개를 든다.
