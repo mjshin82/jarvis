@@ -21,6 +21,7 @@ export class MeetingDO {
   private micSender: WebSocket | null = null;
   private micReceiver: WebSocket | null = null;
   private lastNoReceiverAt = 0;
+  private lastMicSource: string | null = null;
   private events: RelayEvent[] = [];   // 최근 N개 (deque)
   private seq = 0;
   private meta: MeetingMeta | null = null;
@@ -140,6 +141,9 @@ export class MeetingDO {
     for (const ev of this.events) {
       this.safeSend(ws, ev);
     }
+    if (this.lastMicSource) {
+      this.safeSend(ws, this.buildEvent({ kind: "mic_source", source: this.lastMicSource as "system" | "remote" }));
+    }
     ws.addEventListener("close", () => {
       this.viewers.delete(ws);
     });
@@ -179,6 +183,18 @@ export class MeetingDO {
       try { this.micReceiver.close(1000, "replaced"); } catch { /* */ }
     }
     this.micReceiver = ws;
+    ws.addEventListener("message", (msg) => {
+      let parsed: any = null;
+      try {
+        const d = (msg as MessageEvent).data;
+        const raw = typeof d === "string" ? d : new TextDecoder().decode(d as ArrayBuffer);
+        parsed = JSON.parse(raw);
+      } catch { return; }
+      if (parsed && parsed.kind === "mic_source") {
+        this.lastMicSource = parsed.source ?? null;
+        this.broadcast(this.buildEvent({ kind: "mic_source", source: parsed.source }));
+      }
+    });
     ws.addEventListener("close", () => { if (this.micReceiver === ws) this.micReceiver = null; });
     ws.addEventListener("error", () => { if (this.micReceiver === ws) this.micReceiver = null; });
   }

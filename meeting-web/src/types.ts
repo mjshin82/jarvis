@@ -13,7 +13,8 @@ export type EventKind =
   | "publisher_disconnected" // viewer 에게 publisher 연결 끊김 통보
   | "mic_start"
   | "mic_stop"
-  | "no_receiver";
+  | "no_receiver"
+  | "mic_source";          // jarvis 가 듣는 소스 상태 (system|remote)
 
 export interface MeetingMeta {
   key: string;
@@ -30,6 +31,7 @@ export interface ClientMessage {
   text?: string;
   meta?: MeetingMeta;
   reason?: string;
+  source?: "system" | "remote";
 }
 
 // worker → viewer: 서버 메타 부착

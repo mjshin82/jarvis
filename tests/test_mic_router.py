@@ -81,3 +81,14 @@ def test_pause_local_suppresses_remote_frames():
     r.resume_local()
     r.on_remote_frame(b"\x00\x00")   # 이제 처리
     assert rem.fed == 1
+
+
+def test_on_switch_called_with_new_source():
+    q = queue.Queue()
+    seen = []
+    r = MicRouter(q, local=_FakeLocal(), remote=_FakeRemote())
+    r.on_switch = seen.append
+    r.note_remote_activity(now=1.0)        # local→remote
+    r.set_override("local")                # remote→local
+    r.set_override("local")                # 변화 없음 → 콜백 없음
+    assert seen == ["remote", "local"]

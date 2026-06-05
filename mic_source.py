@@ -109,13 +109,14 @@ class MicRouter:
           'remote'— 원격 강제
     """
 
-    def __init__(self, block_queue, *, local=None, remote=None, clock=time.monotonic):
+    def __init__(self, block_queue, *, local=None, remote=None, clock=time.monotonic, on_switch=None):
         self._q = block_queue
         self._clock = clock
         self._mode = "auto"
         self._active = "local"
         self._last_remote = 0.0
         self._suppressed = False   # 회의 모드 등에서 원격 프레임 처리 일시 중단
+        self.on_switch = on_switch   # 소스 전환 시 호출(source: str). 나중에 주입 가능.
         self.local = local if local is not None else LocalMicSource(sink=self._sink_local)
         self.remote = remote if remote is not None else RemoteMicSource(sink=self._sink_remote)
 
@@ -180,6 +181,8 @@ class MicRouter:
         except queue.Empty:
             pass
         self.remote.reset()
+        if self.on_switch is not None:
+            self.on_switch(self._active)
 
     async def run_idle_monitor(self):
         import asyncio
