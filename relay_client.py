@@ -12,6 +12,7 @@
 """
 import asyncio
 import json
+import struct
 import time
 from dataclasses import asdict
 from typing import Any
@@ -72,6 +73,14 @@ class RelayClient:
     async def emit_async(self, kind: str, text: str = "") -> None:
         """MeetingSession.add_listener 가 async 콜백을 기대하므로 await 가능 래퍼."""
         self.emit(kind, text)
+
+    def emit_audio(self, pcm_bytes: bytes, sr: int) -> None:
+        """TTS PCM(int16 LE)을 binary 프레임으로 enqueue: [4B sr LE][int16 PCM]."""
+        frame = struct.pack("<I", int(sr)) + bytes(pcm_bytes)
+        try:
+            self._queue.put_nowait(frame)
+        except asyncio.QueueFull:
+            self.on_log("[relay] 큐 가득참 — 오디오 드롭")
 
     async def close(self) -> None:
         """end 송신 후 sender 정리. 회의 종료 시 호출."""
@@ -139,6 +148,12 @@ class RelayClient:
                 pass
             backoff = min(backoff * 2, 8.0)
 
+    async def _send_item(self, ws, item) -> None:
+        if isinstance(item, (bytes, bytearray)):
+            await ws.send(item)
+        else:
+            await ws.send(json.dumps(item, ensure_ascii=False))
+
     async def _connect_once(self) -> None:
         url = self._publish_url()
         headers = {"Authorization": f"Bearer {self.token}"}
@@ -157,7 +172,7 @@ class RelayClient:
                 except asyncio.TimeoutError:
                     continue
                 try:
-                    await ws.send(json.dumps(msg, ensure_ascii=False))
+                    await self._send_item(ws, msg)
                 except ConnectionClosed:
                     # 큐에 다시 넣고 바깥 _run 에서 재연결
                     try:
@@ -165,7 +180,7 @@ class RelayClient:
                     except asyncio.QueueFull:
                         pass
                     raise
-                if msg.get("kind") == "end":
+                if not isinstance(msg, (bytes, bytearray)) and msg.get("kind") == "end":
                     # end 송신 후 깔끔 종료
                     return
             # stop signal: 큐에 남은 거 더 보낼 필요 없음
