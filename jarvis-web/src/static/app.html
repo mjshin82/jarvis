@@ -88,8 +88,8 @@
     background: var(--accent); color: #fff; padding: 8px 16px; border-radius: 999px; font-size: 14px;
     cursor: pointer; box-shadow: 0 2px 10px #0005; }
   #sound-hint.hidden { display: none; }
-  /* dock 가림 방지 */
-  #chat, #log { padding-bottom: 80px; }
+  /* dock 가림 방지 — 독 높이(버튼48+패딩20) + iOS 안전영역 만큼 하단 여백 */
+  #chat, #log { padding-bottom: calc(88px + env(safe-area-inset-bottom)); }
 
   /* 뷰 토글 */
   #home-view, #meeting-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
@@ -116,7 +116,7 @@
   .info { color: var(--muted); font-size: 13px; }
   .draft .src::after { content: "▍"; display: inline-block; margin-left: 4px; animation: blink 1s steps(2, start) infinite; opacity: 0.6; }
   @keyframes blink { to { visibility: hidden; } }
-  .lockbar { position: fixed; bottom: 84px; left: 50%; transform: translateX(-50%);
+  .lockbar { position: fixed; bottom: calc(100px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%);
     background: var(--accent); color: white; padding: 6px 14px; border-radius: 999px;
     font-size: 13px; cursor: pointer; opacity: 0; pointer-events: none; transition: opacity .2s; }
   .lockbar.show { opacity: 1; pointer-events: auto; }
