@@ -10,10 +10,8 @@ from urllib.parse import quote
 
 try:
     import websockets
-    from websockets.exceptions import ConnectionClosed
 except Exception:  # pragma: no cover
     websockets = None  # type: ignore
-    ConnectionClosed = Exception  # type: ignore
 
 
 class RemoteMicReceiver:

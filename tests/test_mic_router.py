@@ -12,6 +12,14 @@ class _FakeRemote:
         pass
 
 
+class _FakeLocal:
+    def start(self):
+        pass
+
+    def stop(self):
+        pass
+
+
 def _block(v=0.0):
     return np.full(512, v, dtype=np.float32)
 
@@ -52,3 +60,24 @@ def test_manual_override_beats_auto():
     r.set_override("local")
     r.note_remote_activity(now=10_001.0)   # 무시됨
     assert r._active == "local"
+
+
+def test_pause_local_suppresses_remote_frames():
+    q = queue.Queue()
+
+    class _Rem:
+        def __init__(self):
+            self.fed = 0
+        def feed(self, b):
+            self.fed += 1
+        def reset(self):
+            pass
+
+    rem = _Rem()
+    r = MicRouter(q, local=_FakeLocal(), remote=rem)
+    r.pause_local()
+    r.on_remote_frame(b"\x00\x00")   # 무시되어야
+    assert rem.fed == 0
+    r.resume_local()
+    r.on_remote_frame(b"\x00\x00")   # 이제 처리
+    assert rem.fed == 1

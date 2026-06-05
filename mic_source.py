@@ -115,6 +115,7 @@ class MicRouter:
         self._mode = "auto"
         self._active = "local"
         self._last_remote = 0.0
+        self._suppressed = False   # 회의 모드 등에서 원격 프레임 처리 일시 중단
         self.local = local if local is not None else LocalMicSource(sink=self._sink_local)
         self.remote = remote if remote is not None else RemoteMicSource(sink=self._sink_remote)
 
@@ -135,13 +136,17 @@ class MicRouter:
         self.local.stop()
 
     def pause_local(self):
+        self._suppressed = True
         self.local.stop()
 
     def resume_local(self):
+        self._suppressed = False
         self.local.start()
 
     # --- 원격 수신 진입점 (RemoteMicReceiver 가 호출) ---
     def on_remote_frame(self, pcm_bytes):
+        if self._suppressed:
+            return
         self.note_remote_activity(self._clock())
         self.remote.feed(pcm_bytes)
 
