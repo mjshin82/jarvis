@@ -18,7 +18,8 @@ export type EventKind =
   | "user"
   | "assistant"
   | "navigate"
-  | "viewers";          // worker → publisher: owner 뷰어 수 통지
+  | "viewers"
+  | "settings";        // worker → owner viewer: 현재 설정 스냅샷(JSON in text)
 
 export interface MeetingMeta {
   key: string;

@@ -27,6 +27,8 @@ import numpy as np
 import config
 import console
 import commands
+import json
+import settings
 import coach
 from intent import mode_intent
 from audio_io import Microphone
@@ -53,6 +55,7 @@ async def main():
     console.start()                                 # 콘솔 입력 활성화 (하단 프롬프트)
     player_task = asyncio.create_task(player.run())
     # 상시 웹 퍼블리셔 (대화/TTS/회의자막 공용). RELAY 설정 시 항상 연결.
+    settings.load()            # setting.yaml 로드(없으면 기본값으로 생성)
     web_pub = None
     web_speaking_until = 0.0   # 웹으로 TTS 재생 추정 종료 시각(에코 게이트)
     if config.RELAY_URL and config.RELAY_TOKEN:
@@ -63,6 +66,7 @@ async def main():
             on_log=console.log, connect_timeout=config.RELAY_TIMEOUT_S,
         )
         await web_pub.connect()
+        web_pub.emit("settings", json.dumps(settings.current()))   # 초기 스냅샷(replay 로 늦은 owner 도 받음)
         home_base = config.RELAY_URL.replace("wss://", "https://").replace("ws://", "http://")
         home_url = f"{home_base}/{config.ROOM_KEY}"
         bw = max(len(home_url) + 4, 60); border = "─" * bw
@@ -94,8 +98,9 @@ async def main():
     if config.RELAY_URL and config.RELAY_TOKEN:
         from control_receiver import ControlReceiver
 
-        async def _on_remote_command(kind):
+        async def _on_remote_command(msg):
             nonlocal hands_free, response, watchdog, stop_after_response
+            kind = msg.get("kind")
             if kind == "meeting_stop":
                 await stop_meeting()
             elif kind == "meeting_start":
@@ -116,6 +121,14 @@ async def main():
                         watchdog.cancel()
                     watchdog = None
                     idle()
+            elif kind == "get_settings":
+                if web_pub is not None:
+                    web_pub.emit("settings", json.dumps(settings.current()))
+            elif kind == "apply_settings":
+                settings.apply(msg.get("value") or {})
+                console.log(f"⚙️ 설정 변경: {settings.current()}")
+                if web_pub is not None:
+                    web_pub.emit("settings", json.dumps(settings.current()))
 
         control_rx = ControlReceiver(
             config.RELAY_URL, config.RELAY_TOKEN,
@@ -141,6 +154,7 @@ async def main():
         "llm": llm,
         "request_exit": exit_event.set,
         "mic_router": (mic.router if config.REMOTE_MIC_ENABLED else None),
+        "web_pub": web_pub,
     }
 
     recognizer = None   # 일반 대화 스트리밍 STT (없으면 배치 STT 폴백)

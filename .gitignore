@@ -29,3 +29,4 @@ jarvis-web/node_modules/
 jarvis-web/.dev.vars
 jarvis-web/.wrangler/
 jarvis-web/dist/
+setting.yaml

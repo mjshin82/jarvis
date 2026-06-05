@@ -23,6 +23,7 @@ from openai import AsyncOpenAI
 import config
 import coach
 import wordbook
+import settings
 
 
 # --- 회의 메타 입력 흐름 ---
@@ -131,7 +132,7 @@ class MeetingSession:
             ctx_lines.append(" / ".join(parts))
         self._tx_system = coach._build_meet_system_prompt("\n".join(ctx_lines), glossary)
 
-        use_remote = (config.MEET_REMOTE_ENABLED
+        use_remote = (settings.get("translate_backend") == "deepseek"
                       and config.DEEPSEEK_API_KEY
                       and config.DEEPSEEK_API_KEY != "sk-your-key-here")
         if use_remote:
@@ -184,6 +185,8 @@ class MeetingSession:
         # RealtimeSTT 는 장치를 직접 잡지 않는다 — jarvis 가 feed_block 으로 먹인다.
         rec_kwargs["use_microphone"] = False
 
+        if settings.get("stt_backend") == "deepgram":
+            self.log("⚙️ Deepgram STT 는 다음 작업 — 현재 로컬 STT 사용")
         self.recorder = AudioToTextRecorder(**rec_kwargs)
 
         # 번역기 셋업 (시스템 프롬프트 1회 빌드 → 매 호출 동일하게 사용)
