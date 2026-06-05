@@ -2,3 +2,5 @@
 # .dev.vars 는 .gitignore 됨.
 
 RELAY_TOKEN=devtoken
+# admin(웹에서 mic 송출) 비밀번호. 배포 시: wrangler secret put ADMIN_PASSWORD
+ADMIN_PASSWORD=changeme
