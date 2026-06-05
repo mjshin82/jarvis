@@ -149,3 +149,14 @@ async def _stop(args: str, ctx: dict):
         ctx["log"]("종료할 모드가 없습니다.")
         return
     await stopper()
+
+
+@command("reload-settings", help="setting.yaml 재로드")
+async def _reload_settings(args: str, ctx: dict):
+    import json
+    import settings
+    settings.load()
+    ctx["log"](f"⚙️ setting.yaml 재로드: {settings.current()}")
+    web_pub = ctx.get("web_pub")
+    if web_pub is not None:
+        web_pub.emit("settings", json.dumps(settings.current()))
