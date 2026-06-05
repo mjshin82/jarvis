@@ -98,6 +98,8 @@ async def main():
             nonlocal hands_free, response, watchdog
             if kind == "meeting_stop":
                 await stop_meeting()
+            elif kind == "meeting_start":
+                await start_meeting_setup()   # 성공 시 _begin_meeting 이 navigate(meeting) 발행
             elif kind == "listen_start":
                 hands_free = True
                 await trigger_wake()   # 호출어 없이 즉시 청취
