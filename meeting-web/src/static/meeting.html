@@ -342,6 +342,15 @@
     return out;
   }
 
+  // 마이크를 비자발적으로 잃었을 때 정리 + UI 리셋 + 알림 (last-wins 로 밀려남 등)
+  function loseMic(msg) {
+    micStop();
+    micOn = false;
+    micToggle.textContent = "🎙️ 마이크 켜기";
+    micToggle.classList.remove("off");
+    if (msg) alert(msg);
+  }
+
   async function micStart() {
     const pw = getPw();
     if (!pw) return;
@@ -349,13 +358,19 @@
     micWS = new WebSocket(`${proto}//${location.host}/mic/${encodeURIComponent(key)}?token=${encodeURIComponent(pw)}`);
     micWS.binaryType = "arraybuffer";
     micWS.onopen = () => { micWS.send(JSON.stringify({ kind: "mic_start" })); };
+    micWS.onmessage = (e) => {
+      // 다른 기기가 마이크를 인수하면 relay 가 kicked 를 보낸다
+      try { if (JSON.parse(e.data).kind === "kicked") loseMic("다른 기기가 마이크를 가져갔습니다."); } catch {}
+    };
     micWS.onclose = (e) => {
       if (e.code === 1006 || e.code === 1008) {
         localStorage.removeItem(ADMIN_KEY);
-        alert("admin 인증 실패 — 비밀번호를 다시 입력하세요.");
-        micStop();
         adminToggle.textContent = "🔒 admin";
         micToggle.classList.add("admin-hidden");
+        loseMic("admin 인증 실패 — 비밀번호를 다시 입력하세요.");
+      } else if (micOn) {
+        // 사용자가 끈 게 아닌데 닫힘 = 외부 요인으로 마이크를 잃음(kicked 메시지 유실 등)
+        loseMic("마이크 연결이 종료되었습니다 (다른 기기가 가져갔을 수 있음).");
       }
     };
     micStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
