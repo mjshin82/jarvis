@@ -94,6 +94,7 @@ class MeetingSession:
         self.realtime_model = realtime_model
         self.language = language
         self.recorder = None
+        self._dg = None        # Deepgram 백엔드(설정 시)
         self._loop = None
         self._final_q: asyncio.Queue[str | None] | None = None
         self._consumer_task: asyncio.Task | None = None
@@ -149,52 +150,61 @@ class MeetingSession:
             self._tx_label = f"local ({self._tx_model})"
 
     def feed_block(self, block) -> None:
-        """MicRouter tap 이 매 블록 호출 — float32 [-1,1] 16kHz 블록을
-        int16 PCM bytes 로 변환해 RealtimeSTT 에 주입.
-        (numpy float32 를 그대로 feed_audio 에 주면 astype(int16) 로 0 이 됨)"""
-        if self.recorder is None:
+        """MicRouter tap 이 매 블록 호출 — float32 [-1,1] 16kHz → int16 PCM 으로
+        활성 STT 백엔드(Deepgram/RealtimeSTT)에 주입."""
+        if self._dg is None and self.recorder is None:
             return
         pcm16 = (np.clip(block, -1.0, 1.0) * 32767).astype(np.int16).tobytes()
-        self.recorder.feed_audio(pcm16, 16000)
+        if self._dg is not None:
+            self._dg.feed_pcm(pcm16)
+        else:
+            self.recorder.feed_audio(pcm16, 16000)
 
     async def start(self) -> None:
-        from RealtimeSTT import AudioToTextRecorder   # 회의 모드 진입할 때만 import
-
         self._loop = asyncio.get_running_loop()
         self._final_q = asyncio.Queue()
-        # 회의 전용 워드북(wordbook_meet.txt)을 양쪽 모델에 컨디셔닝으로 주입.
-        # 평상시 자비스 워드북과 분리해 회의에서만 쓰는 고유명사 모음.
-        wb_prompt = wordbook.load_initial_prompt(path=wordbook.MEET_PATH)
 
-        rec_kwargs = dict(
-            model=self.model,
-            realtime_model_type=self.realtime_model,
-            enable_realtime_transcription=True,
-            on_realtime_transcription_update=self._on_partial,
-            language=self.language,
-            initial_prompt=wb_prompt,
-            initial_prompt_realtime=wb_prompt,
-            spinner=False,
-            post_speech_silence_duration=0.7,
-            silero_sensitivity=0.4,
-            webrtc_sensitivity=3,
-            device="cpu",
-            compute_type="int8",
-            level=30,   # WARNING 만
-        )
-        # RealtimeSTT 는 장치를 직접 잡지 않는다 — jarvis 가 feed_block 으로 먹인다.
-        rec_kwargs["use_microphone"] = False
+        # STT 백엔드: 설정 Deepgram(+키) 우선, 실패/미설정 시 RealtimeSTT 폴백
+        if settings.get("stt_backend") == "deepgram" and config.DEEPGRAM_API_KEY:
+            from deepgram_stt import DeepgramSTT
+            try:
+                self._dg = DeepgramSTT(
+                    config.DEEPGRAM_API_KEY, language=self.language,
+                    on_partial=self._dg_partial, on_final=self._dg_final, on_log=self.log,
+                )
+                await self._dg.start()
+                self.recorder = None
+                self.log("🎤 회의 STT: Deepgram (nova-3, multi)")
+            except Exception as e:
+                self._dg = None
+                self.log(f"Deepgram 연결 실패 — 로컬 STT 폴백: {e}")
 
-        if settings.get("stt_backend") == "deepgram":
-            self.log("⚙️ Deepgram STT 는 다음 작업 — 현재 로컬 STT 사용")
-        self.recorder = AudioToTextRecorder(**rec_kwargs)
+        if self._dg is None:
+            from RealtimeSTT import AudioToTextRecorder   # 회의 진입 시에만 import
+            wb_prompt = wordbook.load_initial_prompt(path=wordbook.MEET_PATH)
+            rec_kwargs = dict(
+                model=self.model,
+                realtime_model_type=self.realtime_model,
+                enable_realtime_transcription=True,
+                on_realtime_transcription_update=self._on_partial,
+                language=self.language,
+                initial_prompt=wb_prompt,
+                initial_prompt_realtime=wb_prompt,
+                spinner=False,
+                post_speech_silence_duration=0.7,
+                silero_sensitivity=0.4,
+                webrtc_sensitivity=3,
+                device="cpu",
+                compute_type="int8",
+                level=30,   # WARNING 만
+            )
+            rec_kwargs["use_microphone"] = False   # jarvis 가 feed_block 으로 먹인다
+            self.recorder = AudioToTextRecorder(**rec_kwargs)
+            self._listen_task = asyncio.create_task(self._listen_loop())
 
-        # 번역기 셋업 (시스템 프롬프트 1회 빌드 → 매 호출 동일하게 사용)
+        # 번역기 + final 소비자는 두 백엔드 공통
         self._setup_translator()
-        # 콜백→큐 브리지: 메인 루프에서 안전하게 처리
         self._consumer_task = asyncio.create_task(self._consume_finals())
-        # 발화 단위 listen 루프: recorder.text() 블로킹 → 스레드로
-        self._listen_task = asyncio.create_task(self._listen_loop())
         self.log(f"🎤 회의 모드 시작 (번역: {self._tx_label}). 끝내려면 /stop.")
 
     async def stop(self) -> None:
@@ -210,6 +220,12 @@ class MeetingSession:
             except Exception:
                 pass
             self.recorder = None
+        if self._dg is not None:
+            try:
+                await self._dg.close()
+            except Exception:
+                pass
+            self._dg = None
         if self._final_q is not None:
             await self._final_q.put(None)
         if self._consumer_task and not self._consumer_task.done():
@@ -228,6 +244,20 @@ class MeetingSession:
         self.log("🎤 회의 모드 종료.")
 
     # --- 내부 ---
+
+    def _dg_partial(self, text: str) -> None:
+        """Deepgram interim — 메인 루프에서 직접 호출(threadsafe 불요)."""
+        text = (text or "").strip()
+        if not text or text == self._partial_last:
+            return
+        self._partial_last = text
+        self._emit("partial", text)
+        self.set_status(f"📝 {text[:80]}")
+
+    def _dg_final(self, text: str) -> None:
+        """Deepgram 발화 종료 — 기존 final 큐로(→ source + 번역)."""
+        if self._final_q is not None:
+            self._final_q.put_nowait((text or "").strip())
 
     def _on_partial(self, text: str):
         """RealtimeSTT 스레드에서 호출. 콘솔 status + listener fan-out 모두 수행.

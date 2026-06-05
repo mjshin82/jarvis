@@ -47,6 +47,7 @@ MOCK_MESSAGE = "AI를 통한 응답은 현재 mock처리됩니다."
 # remote: DeepSeek (mock 모드에선 키 없어도 동작하도록 getenv)
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
+DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY", "")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 
 # local: Ollama. 서버 실행 `ollama serve`, 모델 준비 `ollama pull gemma4:e4b`
