@@ -1,5 +1,5 @@
 {
-  "name": "meeting-web",
+  "name": "jarvis-web",
   "version": "0.1.0",
   "private": true,
   "description": "Jarvis 회의 모드 자막 중계 — Cloudflare Workers + Durable Objects",

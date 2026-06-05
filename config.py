@@ -112,7 +112,7 @@ def _room_key(name: str, max_len: int = 30) -> str:
 
 
 # 회의 자막 + 원격 마이크가 공유하는 단일 방 key (jarvis 1개이므로 이름 기반 고정).
-# 웹은 항상 https://<relay>/m/<ROOM_KEY> 로 접속한다.
+# 웹은 항상 https://<relay>/<ROOM_KEY> (홈) / /<ROOM_KEY>/meeting (회의) 로 접속한다.
 ROOM_KEY = _room_key(USER_NAME)
 
 MEET_CONTEXT = os.getenv("MEET_CONTEXT", (
