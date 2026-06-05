@@ -351,6 +351,8 @@ async def main():
                 set_status=console.set_status,
                 llm=llm,
                 meta=meta,
+                model=config.MEET_STT_MODEL,
+                realtime_model=config.MEET_STT_REALTIME_MODEL,
             )
             await sess.start()
             meeting_session["obj"] = sess
