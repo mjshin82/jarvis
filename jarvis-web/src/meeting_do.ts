@@ -14,10 +14,17 @@ interface Env {
   // 빈 인터페이스이지만 DO 컨텍스트용
 }
 
+// 공개(public) 뷰어에게 보내도 되는 자막 계열 kind. 그 외(user/assistant/navigate/mic_source)·
+// 바이너리 TTS 는 owner 전용.
+const PUBLIC_KINDS = new Set([
+  "hello", "source", "translation_ko", "translation_en", "partial",
+  "gap", "info", "end", "kicked", "publisher_disconnected",
+]);
+
 export class MeetingDO {
   private state: DurableObjectState;
   private publisher: WebSocket | null = null;
-  private viewers: Set<WebSocket> = new Set();
+  private viewers: Map<WebSocket, "owner" | "public"> = new Map();
   private micSender: WebSocket | null = null;
   private micReceiver: WebSocket | null = null;
   private controlSender: WebSocket | null = null;
@@ -40,7 +47,7 @@ export class MeetingDO {
     const parts = url.pathname.split("/").filter(Boolean);
     // parts[0] = "__do", parts[1] = role, parts[2..] = key
     const role = parts[1];
-    if (role !== "publish" && role !== "subscribe" && role !== "mic" && role !== "mic-recv" && role !== "control" && role !== "control-recv") {
+    if (role !== "publish" && role !== "subscribe" && role !== "mic" && role !== "mic-recv" && role !== "control" && role !== "control-recv" && role !== "watch") {
       return new Response("not found", { status: 404 });
     }
     if (request.headers.get("Upgrade") !== "websocket") {
@@ -54,7 +61,9 @@ export class MeetingDO {
     if (role === "publish") {
       this.attachPublisher(server);
     } else if (role === "subscribe") {
-      this.attachViewer(server);
+      this.attachViewer(server, "owner");
+    } else if (role === "watch") {
+      this.attachViewer(server, "public");
     } else if (role === "mic") {
       this.attachMicSender(server);
     } else if (role === "mic-recv") {
@@ -152,14 +161,16 @@ export class MeetingDO {
 
   // --- viewer ---
 
-  private attachViewer(ws: WebSocket): void {
-    this.viewers.add(ws);
-    // replay: 최근 events 그대로 1회 전송
-    for (const ev of this.events) {
-      this.safeSend(ws, ev);
-    }
-    if (this.lastMicSource) {
-      this.safeSend(ws, this.buildEvent({ kind: "mic_source", source: this.lastMicSource as "system" | "remote" }));
+  private attachViewer(ws: WebSocket, role: "owner" | "public"): void {
+    this.viewers.set(ws, role);
+    // replay 는 owner 만 (public = 라이브만, 과거 자막 미노출)
+    if (role === "owner") {
+      for (const ev of this.events) {
+        this.safeSend(ws, ev);
+      }
+      if (this.lastMicSource) {
+        this.safeSend(ws, this.buildEvent({ kind: "mic_source", source: this.lastMicSource as "system" | "remote" }));
+      }
     }
     ws.addEventListener("close", () => {
       this.viewers.delete(ws);
@@ -273,13 +284,15 @@ export class MeetingDO {
   }
 
   private broadcast(ev: RelayEvent): void {
-    for (const ws of this.viewers) {
+    for (const [ws, role] of this.viewers) {
+      if (role === "public" && !PUBLIC_KINDS.has(ev.kind)) continue;   // public 은 자막만
       this.safeSend(ws, ev);
     }
   }
 
   private broadcastBinary(data: ArrayBuffer): void {
-    for (const ws of this.viewers) {
+    for (const [ws, role] of this.viewers) {
+      if (role !== "owner") continue;   // TTS 오디오는 owner 만
       try { ws.send(data); } catch { /* 끊긴 소켓 — close 에서 정리 */ }
     }
   }

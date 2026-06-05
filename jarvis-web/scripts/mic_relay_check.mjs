@@ -122,15 +122,16 @@ async function main() {
   console.log("navigate replay 미적재:", replayedNav ? "FAIL (late viewer got navigate)" : "OK");
   navPub2.close(); lateViewer.close();
 
-  // 11) /:name 과 /:name/meeting 가 동일 셸 HTML 반환
+  // 11) /:name 은 SPA(app.html), /:name/meeting 은 공개 뷰어(viewer.html) — 서로 다른 페이지
   const httpBase = BASE.replace(/^ws/, "http");
   const r1 = await fetch(`${httpBase}/Concode`);
   const r2 = await fetch(`${httpBase}/Concode/meeting`);
   const t1 = await r1.text(), t2 = await r2.text();
-  const okShell = r1.status === 200 && r2.status === 200
+  const routesOk = r1.status === 200 && r2.status === 200
     && (r1.headers.get("content-type") || "").includes("text/html")
-    && t1 === t2 && t1.includes("data-view") && t1.includes('id="meeting-view"');
-  console.log("동일 셸 서빙:", okShell ? "OK" : `FAIL (s1=${r1.status} s2=${r2.status} eq=${t1 === t2})`);
+    && t1.includes("data-view") && t1.includes('id="voice-toggle"')   // 홈 = SPA
+    && t2.includes("회의 자막") && !t2.includes('id="voice-toggle"');  // 회의 = 공개 뷰어(입력 없음)
+  console.log("라우트 분리(SPA/공개뷰어):", routesOk ? "OK" : `FAIL (s1=${r1.status} s2=${r2.status})`);
 
   // 12) control 채널: sender(/control) → receiver(/control-recv) forward
   const ctlRecv = await open(`${BASE}/control-recv/${KEY}`, { headers: { Authorization: `Bearer ${RELAY}` } });
@@ -140,6 +141,22 @@ async function main() {
   const cm = await Promise.race([ctlGot, new Promise((_, r) => setTimeout(() => r(new Error("timeout")), 3000))]).catch((e) => fail(e.message));
   console.log("control forward:", cm.text && cm.text.includes("meeting_stop") ? "OK" : `FAIL (${cm.text})`);
   ctlSend.close(); ctlRecv.close();
+
+  // 13) 공개 watch 뷰어: 자막(source)만, 채팅(assistant)·무인증
+  const watchV = await open(`${BASE}/watch/${KEY}`);                 // 무인증 OK
+  const subV = await open(`${BASE}/subscribe/${KEY}?token=${ADMIN}`);
+  const wMsgs = [], sMsgs = [];
+  watchV.on("message", (d, isB) => { if (!isB) wMsgs.push(d.toString()); });
+  subV.on("message", (d, isB) => { if (!isB) sMsgs.push(d.toString()); });
+  const pub3 = await open(`${BASE}/publish/${KEY}`, { headers: { Authorization: `Bearer ${RELAY}` } });
+  pub3.send(JSON.stringify({ kind: "source", text: "공개자막" }));
+  pub3.send(JSON.stringify({ kind: "assistant", text: "사적대화" }));
+  await new Promise((r) => setTimeout(r, 600));
+  const watchOk = wMsgs.some((s) => s.includes('"source"') && s.includes("공개자막")) && !wMsgs.some((s) => s.includes('"assistant"'));
+  const subOk = sMsgs.some((s) => s.includes('"assistant"') && s.includes("사적대화"));
+  console.log("public watch 자막만:", watchOk ? "OK" : `FAIL (${wMsgs.length} msgs)`);
+  console.log("owner subscribe 전체:", subOk ? "OK" : "FAIL");
+  pub3.close(); watchV.close(); subV.close();
 
   [recv, send, send2, viewer, viewer2].forEach((w) => w.close());
   process.exit(0);

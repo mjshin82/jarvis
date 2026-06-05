@@ -16,6 +16,7 @@ import { Hono } from "hono";
 import { MeetingDO } from "./meeting_do";
 // HTML 을 텍스트로 번들. wrangler 가 esbuild loader 로 처리.
 import APP_HTML from "./static/app.html";
+import VIEWER_HTML from "./static/viewer.html";
 
 export { MeetingDO };
 
@@ -74,8 +75,13 @@ app.get("/control-recv/:key", async (c) => {
   return forwardToDO(c.env, c.req.param("key"), "control-recv", c.req.raw);
 });
 
+app.get("/watch/:key", async (c) => {
+  if (c.req.header("Upgrade") !== "websocket") return c.text("expected websocket", 426);
+  return forwardToDO(c.env, c.req.param("key"), "watch", c.req.raw);
+});
+
 app.get("/:name/meeting", (c) => {
-  return new Response(APP_HTML, {
+  return new Response(VIEWER_HTML, {
     headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
   });
 });
@@ -104,7 +110,7 @@ function checkSecret(c: any, expected: string): boolean {
   return !!tok && !!expected && tok === expected;
 }
 
-function forwardToDO(env: Env, key: string, role: "publish" | "subscribe" | "mic" | "mic-recv" | "control" | "control-recv", original: Request): Promise<Response> {
+function forwardToDO(env: Env, key: string, role: "publish" | "subscribe" | "mic" | "mic-recv" | "control" | "control-recv" | "watch", original: Request): Promise<Response> {
   const id = env.MEETING_DO.idFromName(key);
   const stub = env.MEETING_DO.get(id);
   // DO 가 라우팅에 활용할 내부 경로
