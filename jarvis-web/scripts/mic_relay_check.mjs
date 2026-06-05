@@ -158,6 +158,19 @@ async function main() {
   console.log("owner subscribe 전체:", subOk ? "OK" : "FAIL");
   pub3.close(); watchV.close(); subV.close();
 
+  // 15) viewer presence: subscribe 접속 시 publisher 가 {kind:"viewers", count>=1} 수신
+  const presPub = await open(`${BASE}/publish/${KEY}`, { headers: { Authorization: `Bearer ${RELAY}` } });
+  const gotV = (async () => {
+    for (;;) {
+      const m = await nextMsg(presPub);
+      if (m.text && /"kind":"viewers"/.test(m.text) && /"count":[1-9]/.test(m.text)) return m.text;
+    }
+  })();
+  const presViewer = await open(`${BASE}/subscribe/${KEY}?token=${ADMIN}`);
+  const pvm = await Promise.race([gotV, new Promise((_, r) => setTimeout(() => r(new Error("timeout")), 3000))]).catch((e) => fail(e.message));
+  console.log("viewer presence 통지:", pvm.includes('"viewers"') ? "OK" : `FAIL (${pvm})`);
+  presViewer.close(); presPub.close();
+
   [recv, send, send2, viewer, viewer2].forEach((w) => w.close());
   process.exit(0);
 }
