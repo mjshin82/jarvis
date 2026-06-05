@@ -19,7 +19,10 @@
   a.navbtn { font-size: 15px; padding: 8px 16px; border-radius: 10px; background: #6b7280; color: #fff; text-decoration: none; }
   #mic-level { width: 120px; height: 8px; background: #ddd4; border-radius: 4px; overflow: hidden; }
   #mic-bar { height: 100%; width: 0%; background: #22c55e; }
-  #chat { flex: 1; padding: 16px; overflow-y: auto; opacity: 0.6; }
+  #chat { flex: 1; padding: 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; opacity: 1; }
+  .bubble { max-width: 80%; padding: 8px 12px; border-radius: 14px; white-space: pre-wrap; line-height: 1.4; }
+  .bubble.user { align-self: flex-end; background: #2563eb; color: #fff; }
+  .bubble.assistant { align-self: flex-start; background: #8883; }
   #login { position: fixed; inset: 0; background: #000a; display: flex; flex-direction: column;
            gap: 12px; align-items: center; justify-content: center; z-index: 10; }
   #login input { font-size: 16px; padding: 10px; width: 240px; border-radius: 8px; border: 1px solid #888; }
@@ -43,7 +46,7 @@
     <div id="mic-level" class="hidden"><div id="mic-bar"></div></div>
     <a class="navbtn" id="to-meeting" href="#">🗣️ 회의 모드로</a>
   </div>
-  <main id="chat">💬 음성 대화는 다음 단계에서 제공됩니다.</main>
+  <main id="chat"></main>
 
 <script>
 (() => {
@@ -57,6 +60,7 @@
   function showLogin() { $("login").classList.remove("hidden"); }
   function hideLogin() { $("login").classList.add("hidden"); }
   $("login-go").addEventListener("click", () => {
+    ensureAudio();
     const pw = $("login-pw").value.trim();
     if (!pw) return;
     localStorage.setItem(ADMIN_KEY, pw);
@@ -65,6 +69,37 @@
   });
   if (getPw()) hideLogin(); else showLogin();
 
+  // ---- TTS Audio + Chat bubble helpers ----
+  let audioCtx = null, playHead = 0;
+  function ensureAudio() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === "suspended") audioCtx.resume();
+  }
+  function playAudio(buf) {
+    ensureAudio();
+    const sr = new DataView(buf).getUint32(0, true);
+    const pcm = new Int16Array(buf, 4);
+    const f32 = new Float32Array(pcm.length);
+    for (let i = 0; i < pcm.length; i++) f32[i] = pcm[i] / 32768;
+    const ab = audioCtx.createBuffer(1, f32.length, sr);
+    ab.copyToChannel(f32, 0);
+    const s = audioCtx.createBufferSource();
+    s.buffer = ab; s.connect(audioCtx.destination);
+    const t = Math.max(audioCtx.currentTime, playHead);
+    s.start(t); playHead = t + ab.duration;
+  }
+  let lastRole = null, lastBubble = null;
+  function addText(role, text) {
+    const chat = $("chat");
+    if (role === lastRole && lastBubble) { lastBubble.textContent += " " + text; }
+    else {
+      const b = document.createElement("div");
+      b.className = "bubble " + role; b.textContent = text;
+      chat.appendChild(b); lastRole = role; lastBubble = b;
+    }
+    chat.scrollTop = chat.scrollHeight;
+  }
+
   // ---- 자막/상태 구독 (소스 배지) ----
   let ws = null, reconnectDelay = 500;
   function connect() {
@@ -72,11 +107,15 @@
     if (!pw) { showLogin(); return; }
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
     ws = new WebSocket(`${proto}//${location.host}/subscribe/${encodeURIComponent(name)}?token=${encodeURIComponent(pw)}`);
+    ws.binaryType = "arraybuffer";
     ws.addEventListener("open", () => { $("conn").textContent = "● live"; reconnectDelay = 500; });
     ws.addEventListener("message", (m) => {
+      if (m.data instanceof ArrayBuffer) { playAudio(m.data); return; }
       try {
         const ev = JSON.parse(m.data);
-        if (ev.kind === "mic_source") {
+        if (ev.kind === "user") addText("user", ev.text || "");
+        else if (ev.kind === "assistant") addText("assistant", ev.text || "");
+        else if (ev.kind === "mic_source") {
           $("mic-src").textContent = ev.source === "remote" ? "🎚️ 원격(폰)" : "🎚️ 시스템";
           $("mic-src").classList.toggle("remote", ev.source === "remote");
         }
@@ -161,6 +200,7 @@
     $("mic-bar").style.width = "0%"; $("mic-level").classList.add("hidden");
   }
   $("mic-toggle").addEventListener("click", async () => {
+    ensureAudio();
     micOn = !micOn;
     $("mic-toggle").textContent = micOn ? "🎙️ 마이크 끄기" : "🎙️ 마이크 켜기";
     $("mic-toggle").classList.toggle("off", micOn);
