@@ -38,10 +38,10 @@ class ControlReceiver:
         except Exception:
             return
         kind = msg.get("kind")
-        if kind == "meeting_stop":
-            await self.on_command("meeting_stop")
-        elif kind == "no_receiver":
+        if kind == "no_receiver":
             self.on_log("[control] relay: 수신자 없음 통지")
+        elif kind:
+            await self.on_command(kind)   # meeting_stop·listen_start·listen_stop 등 포워딩
 
     def start(self):
         if websockets is None:

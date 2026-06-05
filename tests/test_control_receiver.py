@@ -17,10 +17,19 @@ def test_meeting_stop_dispatches():
     assert calls == ["meeting_stop"]
 
 
-def test_other_kinds_ignored():
+def test_known_commands_dispatch():
     calls = []
     rx = _rx(calls)
-    asyncio.run(rx._handle_message('{"kind":"something_else"}'))
+    asyncio.run(rx._handle_message('{"kind":"listen_start"}'))
+    asyncio.run(rx._handle_message('{"kind":"listen_stop"}'))
+    asyncio.run(rx._handle_message('{"kind":"meeting_stop"}'))
+    assert calls == ["listen_start", "listen_stop", "meeting_stop"]
+
+
+def test_non_commands_ignored():
+    calls = []
+    rx = _rx(calls)
+    asyncio.run(rx._handle_message('{"kind":"no_receiver"}'))   # 로그만, 명령 아님
     asyncio.run(rx._handle_message("not json at all"))
     asyncio.run(rx._handle_message('{"no":"kind"}'))
     assert calls == []

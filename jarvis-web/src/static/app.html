@@ -45,6 +45,15 @@
   #mic-bar { height: 100%; width: 0%; background: #22c55e; }
   #meeting-stop { display: none; background: #dc2626; }
   body[data-view="meeting"] #meeting-stop { display: inline-block; }
+  #voice-toggle {
+    position: fixed; right: 18px; bottom: 18px; z-index: 15;
+    width: 56px; height: 56px; border-radius: 50%; padding: 0; border: none;
+    background: #111; color: #fff; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 10px #0005;
+  }
+  #voice-toggle.active { background: #dc2626; animation: vpulse 1.2s ease-in-out infinite; }
+  @keyframes vpulse { 0%, 100% { box-shadow: 0 0 0 0 #dc262688; } 50% { box-shadow: 0 0 0 9px #dc262600; } }
+  body[data-view="meeting"] #voice-toggle { display: none; }
 
   /* 뷰 토글 */
   #home-view, #meeting-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
@@ -105,6 +114,14 @@
   <div id="home-view">
     <main id="chat"></main>
   </div>
+  <button id="voice-toggle" aria-label="음성 대화">
+    <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
+      <rect x="3" y="8" width="2.5" height="6" rx="1.25" fill="currentColor"/>
+      <rect x="7.5" y="5" width="2.5" height="12" rx="1.25" fill="currentColor"/>
+      <rect x="12" y="3" width="2.5" height="16" rx="1.25" fill="currentColor"/>
+      <rect x="16.5" y="7" width="2.5" height="8" rx="1.25" fill="currentColor"/>
+    </svg>
+  </button>
   <div id="meeting-view">
     <main id="log"></main>
     <div class="lockbar" id="lockbar">↓ 새 자막 보기</div>
@@ -408,19 +425,52 @@
     else micStop();
   });
 
-  // ---- 회의 종료 (웹 → control 채널, one-shot) ----
-  $("meeting-stop").addEventListener("click", () => {
+  // ---- 제어 채널(웹 → jarvis) one-shot 전송 ----
+  function sendControl(obj) {
     const pw = getPw();
-    if (!pw) { showLogin(); return; }
+    if (!pw) return;
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
     try {
       const cws = new WebSocket(`${proto}//${location.host}/control/${encodeURIComponent(name)}?token=${encodeURIComponent(pw)}`);
       cws.onopen = () => {
-        try { cws.send(JSON.stringify({ kind: "meeting_stop" })); }
+        try { cws.send(JSON.stringify(obj)); }
         finally { setTimeout(() => { try { cws.close(); } catch {} }, 200); }
       };
       cws.onerror = () => {};
     } catch {}
+  }
+
+  // ---- 회의 종료 (웹 → control) ----
+  $("meeting-stop").addEventListener("click", () => {
+    if (!getPw()) { showLogin(); return; }
+    sendControl({ kind: "meeting_stop" });
+  });
+
+  // ---- 음성 토글 (핸즈프리: 마이크 ON + 즉시 청취, 타임아웃 없음) ----
+  let voiceOn = false;
+  function syncMicUI() {
+    $("mic-toggle").textContent = micOn ? "🎙️ 마이크 끄기" : "🎙️ 마이크 켜기";
+    $("mic-toggle").classList.toggle("off", micOn);
+  }
+  $("voice-toggle").addEventListener("click", async () => {
+    const pw = getPw();
+    if (!pw) { showLogin(); return; }
+    ensureAudio();
+    voiceOn = !voiceOn;
+    $("voice-toggle").classList.toggle("active", voiceOn);
+    if (voiceOn) {
+      if (!micOn) {
+        try { await micStart(); micOn = true; syncMicUI(); }
+        catch (e) {
+          alert("마이크 권한 실패: " + e.message);
+          voiceOn = false; $("voice-toggle").classList.remove("active"); return;
+        }
+      }
+      sendControl({ kind: "listen_start" });
+    } else {
+      sendControl({ kind: "listen_stop" });
+      if (micOn) { micStop(); micOn = false; syncMicUI(); }
+    }
   });
 
   // ---- 초기화 ----

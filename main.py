@@ -95,8 +95,19 @@ async def main():
         from control_receiver import ControlReceiver
 
         async def _on_remote_command(kind):
+            nonlocal hands_free, response, watchdog
             if kind == "meeting_stop":
                 await stop_meeting()
+            elif kind == "listen_start":
+                hands_free = True
+                await trigger_wake()   # 호출어 없이 즉시 청취
+            elif kind == "listen_stop":
+                hands_free = False
+                await cancel(response); response = None
+                if watchdog is not None and not watchdog.done():
+                    watchdog.cancel()
+                watchdog = None
+                idle()
 
         control_rx = ControlReceiver(
             config.RELAY_URL, config.RELAY_TOKEN,
@@ -107,6 +118,7 @@ async def main():
     state = "WAITING_WAKE"
     response: asyncio.Task | None = None   # 진행 중 응답 흐름 (텍스트 또는 음성)
     watchdog: asyncio.Task | None = None   # LISTENING 타임아웃
+    hands_free = False                     # 웹 음성버튼 핸즈프리 — 타임아웃 무효 + 계속 청취
     text_queue: asyncio.Queue[str] = asyncio.Queue()   # 텍스트 입력 대기열
     exit_event = asyncio.Event()           # /bye 등 명시적 종료 요청
 
@@ -242,7 +254,7 @@ async def main():
         # 웹 TTS 는 폰에서 재생되어 player.is_speaking()=False — web_speaking_until 까지 대기
         while player.is_speaking() or time.monotonic() < web_speaking_until:
             await asyncio.sleep(0.1)
-        if config.FOLLOW_UP:
+        if hands_free or config.FOLLOW_UP:
             await enter_listening(cue=True)
         else:
             idle()
@@ -276,6 +288,8 @@ async def main():
         # 번역 모드는 사용자가 /stop 으로만 빠져나가므로 타임아웃 무효
         if MODE.is_translate():
             return
+        if hands_free:
+            return   # 핸즈프리 — 타임아웃 없이 계속 청취
         if state == "LISTENING":
             console.log("\n⌛ 입력이 없어 대기 상태로 돌아갑니다.")
             idle()
@@ -554,7 +568,7 @@ async def main():
         # 웹 TTS 는 폰에서 재생되어 player.is_speaking()=False — web_speaking_until 까지 대기
         while player.is_speaking() or time.monotonic() < web_speaking_until:
             await asyncio.sleep(0.1)
-        if config.FOLLOW_UP:
+        if hands_free or config.FOLLOW_UP:
             await enter_listening(cue=True)
         else:
             idle()
