@@ -18,6 +18,8 @@ export class MeetingDO {
   private state: DurableObjectState;
   private publisher: WebSocket | null = null;
   private viewers: Set<WebSocket> = new Set();
+  private micSender: WebSocket | null = null;
+  private micReceiver: WebSocket | null = null;
   private events: RelayEvent[] = [];   // 최근 N개 (deque)
   private seq = 0;
   private meta: MeetingMeta | null = null;
@@ -33,7 +35,7 @@ export class MeetingDO {
     const parts = url.pathname.split("/").filter(Boolean);
     // parts[0] = "__do", parts[1] = role, parts[2..] = key
     const role = parts[1];
-    if (role !== "publish" && role !== "subscribe") {
+    if (role !== "publish" && role !== "subscribe" && role !== "mic" && role !== "mic-recv") {
       return new Response("not found", { status: 404 });
     }
     if (request.headers.get("Upgrade") !== "websocket") {
@@ -46,8 +48,12 @@ export class MeetingDO {
 
     if (role === "publish") {
       this.attachPublisher(server);
-    } else {
+    } else if (role === "subscribe") {
       this.attachViewer(server);
+    } else if (role === "mic") {
+      this.attachMicSender(server);
+    } else {
+      this.attachMicReceiver(server);
     }
 
     return new Response(null, { status: 101, webSocket: client });
@@ -139,6 +145,37 @@ export class MeetingDO {
     ws.addEventListener("error", () => {
       this.viewers.delete(ws);
     });
+  }
+
+  // --- 원격 마이크: 브라우저 송신 → jarvis 수신 포워딩 ---
+
+  private attachMicSender(ws: WebSocket): void {
+    if (this.micSender) {
+      try { this.micSender.close(1000, "replaced"); } catch { /* */ }
+    }
+    this.micSender = ws;
+    ws.addEventListener("message", (msg) => {
+      const data = (msg as MessageEvent).data as string | ArrayBuffer;
+      if (!this.micReceiver) {
+        this.safeSend(ws, { ts: Date.now() / 1000, seq: 0, kind: "no_receiver" } as RelayEvent);
+        return;
+      }
+      try {
+        // binary(오디오) 와 string(제어) 둘 다 그대로 전달
+        this.micReceiver.send(data);
+      } catch { /* 수신측 끊김 — 다음 close 에서 정리 */ }
+    });
+    ws.addEventListener("close", () => { if (this.micSender === ws) this.micSender = null; });
+    ws.addEventListener("error", () => { if (this.micSender === ws) this.micSender = null; });
+  }
+
+  private attachMicReceiver(ws: WebSocket): void {
+    if (this.micReceiver) {
+      try { this.micReceiver.close(1000, "replaced"); } catch { /* */ }
+    }
+    this.micReceiver = ws;
+    ws.addEventListener("close", () => { if (this.micReceiver === ws) this.micReceiver = null; });
+    ws.addEventListener("error", () => { if (this.micReceiver === ws) this.micReceiver = null; });
   }
 
   // --- helpers ---
