@@ -116,18 +116,27 @@ class MicRouter:
         self._active = "local"
         self._last_remote = 0.0
         self._suppressed = False   # 회의 모드 등에서 원격 프레임 처리 일시 중단
+        self._tap = None   # 설정되면 활성 소스 블록을 여기로 우회(회의 모드 등)
         self.on_switch = on_switch   # 소스 전환 시 호출(source: str). 나중에 주입 가능.
         self.local = local if local is not None else LocalMicSource(sink=self._sink_local)
         self.remote = remote if remote is not None else RemoteMicSource(sink=self._sink_remote)
 
     # --- sink (소스가 블록을 흘려보낼 때 호출) ---
     def _sink_local(self, block):
-        if self._active == "local":
-            self._q.put(block)
+        if self._active != "local":
+            return
+        if self._tap is not None:          # 회의 모드: 활성 소스 블록을 우회
+            self._tap(block)
+            return
+        self._q.put(block)
 
     def _sink_remote(self, block):
-        if self._active == "remote":
-            self._q.put(block)
+        if self._active != "remote":
+            return
+        if self._tap is not None:
+            self._tap(block)
+            return
+        self._q.put(block)
 
     # --- 라이프사이클 ---
     def start(self):
@@ -150,6 +159,14 @@ class MicRouter:
             return
         self.note_remote_activity(self._clock())
         self.remote.feed(pcm_bytes)
+
+    def set_tap(self, fn):
+        """활성 소스 블록(float32 512)을 외부 소비자로 우회. None 으로 해제(기존 큐 복귀)."""
+        self._tap = fn
+
+    @property
+    def active(self):
+        return self._active
 
     # --- 전환 로직 ---
     def note_remote_activity(self, now):

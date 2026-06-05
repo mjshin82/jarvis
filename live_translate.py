@@ -17,7 +17,7 @@ import asyncio
 import sys
 from dataclasses import dataclass, field
 
-import pyaudio
+import numpy as np
 from openai import AsyncOpenAI
 
 import config
@@ -69,24 +69,6 @@ class MeetingSetup:
         self.step_index += 1
 
 
-def _pick_physical_mic() -> int | None:
-    """BlackHole/Teams 등 가상장치 회피 후 첫 물리 마이크 인덱스."""
-    p = pyaudio.PyAudio()
-    skip = ("blackhole", "loopback", "aggregate", "teams", "soundflower")
-    chosen = None
-    try:
-        for i in range(p.get_device_count()):
-            info = p.get_device_info_by_index(i)
-            if info["maxInputChannels"] <= 0:
-                continue
-            if any(s in info["name"].lower() for s in skip):
-                continue
-            chosen = i
-            break
-    finally:
-        p.terminate()
-    return chosen
-
 
 class MeetingSession:
     """RealtimeSTT 한 인스턴스를 들고 다닌다. 메인 이벤트 루프에서 콜백을
@@ -101,7 +83,8 @@ class MeetingSession:
     def __init__(self, *, log, set_status, llm,
                  meta: MeetingMeta | None = None,
                  model: str = "small", realtime_model: str = "tiny",
-                 language: str = ""):
+                 language: str = "",
+                 ):
         self.log = log
         self.set_status = set_status
         self.llm = llm                       # 자비스 본체 LLM (폴백용)
@@ -164,18 +147,25 @@ class MeetingSession:
             self._tx_model = self.llm.model
             self._tx_label = f"local ({self._tx_model})"
 
+    def feed_block(self, block) -> None:
+        """MicRouter tap 이 매 블록 호출 — float32 [-1,1] 16kHz 블록을
+        int16 PCM bytes 로 변환해 RealtimeSTT 에 주입.
+        (numpy float32 를 그대로 feed_audio 에 주면 astype(int16) 로 0 이 됨)"""
+        if self.recorder is None:
+            return
+        pcm16 = (np.clip(block, -1.0, 1.0) * 32767).astype(np.int16).tobytes()
+        self.recorder.feed_audio(pcm16, 16000)
+
     async def start(self) -> None:
         from RealtimeSTT import AudioToTextRecorder   # 회의 모드 진입할 때만 import
 
         self._loop = asyncio.get_running_loop()
         self._final_q = asyncio.Queue()
-        mic_idx = _pick_physical_mic()
-
         # 회의 전용 워드북(wordbook_meet.txt)을 양쪽 모델에 컨디셔닝으로 주입.
         # 평상시 자비스 워드북과 분리해 회의에서만 쓰는 고유명사 모음.
         wb_prompt = wordbook.load_initial_prompt(path=wordbook.MEET_PATH)
 
-        self.recorder = AudioToTextRecorder(
+        rec_kwargs = dict(
             model=self.model,
             realtime_model_type=self.realtime_model,
             enable_realtime_transcription=True,
@@ -189,9 +179,12 @@ class MeetingSession:
             webrtc_sensitivity=3,
             device="cpu",
             compute_type="int8",
-            input_device_index=mic_idx,
             level=30,   # WARNING 만
         )
+        # RealtimeSTT 는 장치를 직접 잡지 않는다 — jarvis 가 feed_block 으로 먹인다.
+        rec_kwargs["use_microphone"] = False
+
+        self.recorder = AudioToTextRecorder(**rec_kwargs)
 
         # 번역기 셋업 (시스템 프롬프트 1회 빌드 → 매 호출 동일하게 사용)
         self._setup_translator()

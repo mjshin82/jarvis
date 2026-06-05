@@ -92,3 +92,40 @@ def test_on_switch_called_with_new_source():
     r.set_override("local")                # remote→local
     r.set_override("local")                # 변화 없음 → 콜백 없음
     assert seen == ["remote", "local"]
+
+
+def test_tap_diverts_active_source_blocks_and_bypasses_queue():
+    q = queue.Queue()
+    tapped = []
+    r = MicRouter(q, local=_FakeLocal(), remote=_FakeRemote())
+    r.set_tap(tapped.append)
+
+    # local active → _sink_local 블록이 tap 으로 (큐 미적재)
+    b1 = _block(0.1)
+    r._sink_local(b1)
+    assert tapped == [b1]
+    assert q.empty()
+
+    # remote active → _sink_remote 블록이 tap 으로
+    r.set_override("remote")
+    b2 = _block(0.2)
+    r._sink_remote(b2)
+    assert tapped == [b1, b2]
+    assert q.empty()
+
+    # 비활성 소스 블록은 무시 (active=remote 인데 local sink 호출)
+    r._sink_local(_block(0.9))
+    assert tapped == [b1, b2]
+
+    # tap 해제 → 큐로 복귀
+    r.set_tap(None)
+    r._sink_remote(_block(0.3))
+    assert q.qsize() == 1
+
+
+def test_active_property():
+    q = queue.Queue()
+    r = MicRouter(q, local=_FakeLocal(), remote=_FakeRemote())
+    assert r.active == "local"
+    r.set_override("remote")
+    assert r.active == "remote"

@@ -300,7 +300,7 @@ async def main():
         return meeting_setup["obj"] is not None
 
     async def start_meeting_setup():
-        """/meet 진입 → 메타 입력 단계 시작. 첫 질문 출력."""
+        """/meet 진입 → (입력 단계 없으면) 곧장 회의 시작."""
         nonlocal response
         if meeting_session["obj"] is not None:
             console.log("회의 모드가 이미 진행 중입니다.")
@@ -346,16 +346,18 @@ async def main():
         if not setup.done:
             console.log(f"   {setup.prompt}")
             return
-        # 완료 → 실제 회의 시작
+        # 완료 → 실제 회의 시작.
+        # 현재 _META_STEPS 가 비어 이 경로는 도달하지 않음(시작은 start_meeting_setup 에서).
         meta = setup.meta
         meeting_setup["obj"] = None
         await _begin_meeting(meta)
 
     async def _begin_meeting(meta) -> None:
-        """메타가 모인 다음 호출. 본체 마이크 양보 + RealtimeSTT 시작.
+        """메타가 모인 다음 호출. RealtimeSTT 시작 + MicRouter tap 으로 현재 활성
+        소스(시스템/폰)를 동적으로 먹인다. mic.pause() 안 함 — 로컬 캡처를 유지해야
+        시스템 마이크를 feed 할 수 있고, tap 이 블록을 큐에서 가로채 wake/VAD 는 idle.
         RELAY_URL/RELAY_TOKEN 이 설정돼 있으면 outbound ws 로 자막 중계도 활성."""
         from live_translate import MeetingSession
-        mic.pause()
         try:
             sess = MeetingSession(
                 log=console.log,
@@ -367,6 +369,8 @@ async def main():
             )
             await sess.start()
             meeting_session["obj"] = sess
+            # 활성 소스 블록을 메인 VAD 대신 RealtimeSTT 로 우회 (소스 전환은 동적)
+            mic.router.set_tap(sess.feed_block)
             console.log(f"🎤 회의를 시작합니다. 회의 번호: {meta.key}")
             # 외부 중계 활성 (옵션) — 자막 페이지 URL 을 박스로 강조 표시
             if config.RELAY_URL and config.RELAY_TOKEN:
@@ -394,7 +398,7 @@ async def main():
                 else:
                     console.log("🌐 중계 서버 연결 실패 — 콘솔만으로 진행합니다.")
         except Exception as ex:
-            mic.resume()
+            mic.router.set_tap(None)
             console.log(f"회의 모드 시작 실패: {ex}")
 
     async def stop_meeting():
@@ -408,8 +412,8 @@ async def main():
         try:
             await sess.stop()
         finally:
+            mic.router.set_tap(None)   # 블록을 메인 큐(wake/VAD)로 복귀
             meeting_session["obj"] = None
-            mic.resume()
             console.set_status(None)
             idle()
 
