@@ -122,8 +122,10 @@ class RemoteMicReceiver:
                         await t
                     except (asyncio.CancelledError, Exception):
                         pass
-            # 비취소 예외는 위로 전파(바깥 _run 백오프 재연결)
+            # 비취소 예외만 위로 전파(바깥 _run 백오프 재연결). 취소된 태스크는 건너뜀.
             for t in done:
+                if t.cancelled():
+                    continue
                 exc = t.exception()
                 if exc and not isinstance(exc, asyncio.CancelledError):
                     raise exc
