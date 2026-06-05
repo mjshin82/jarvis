@@ -24,13 +24,17 @@ class RemoteMicSource:
         self._buf = np.empty(0, dtype=np.float32)
 
     def feed(self, pcm_bytes: bytes) -> None:
-        """Int16 little-endian PCM 바이트를 받아 누적·재청크."""
+        """Int16 little-endian PCM 바이트를 받아 누적·재청크.
+        네트워크 프레임이라 홀수 바이트(부분 샘플)는 버린다."""
+        if len(pcm_bytes) % 2:
+            pcm_bytes = pcm_bytes[:-1]
         samples = np.frombuffer(pcm_bytes, dtype="<i2").astype(np.float32) / 32768.0
         self._buf = np.concatenate([self._buf, samples])
         bs = config.BLOCK_SIZE
         while len(self._buf) >= bs:
             self._sink(np.ascontiguousarray(self._buf[:bs]))
             self._buf = self._buf[bs:]
+        self._buf = self._buf.copy()   # 뷰가 큰 버퍼를 잡고 있지 않도록 압축
 
     def reset(self) -> None:
         self._buf = np.empty(0, dtype=np.float32)

@@ -26,3 +26,15 @@ def test_reset_clears_partial_buffer():
     src.reset()
     src.feed(np.ones(512, dtype=np.int16).tobytes())   # reset 후 정확히 1블록
     assert len(out) == 1
+
+
+def test_feed_tolerates_odd_byte_and_empty():
+    out = []
+    src = RemoteMicSource(sink=out.append)
+    src.feed(b"")                 # 빈 입력 → 무방출, 예외 없음
+    src.feed(b"\x01")             # 홀수 1바이트 → 버려짐, 예외 없음
+    assert out == []
+    # 512 샘플 = 1024바이트 + 끝에 홀수 1바이트 → 정확히 1블록
+    pcm = (np.ones(512, dtype=np.int16) * 100).tobytes() + b"\x07"
+    src.feed(pcm)
+    assert len(out) == 1
