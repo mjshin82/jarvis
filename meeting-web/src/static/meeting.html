@@ -297,6 +297,7 @@
   const ADMIN_KEY = "jarvis_admin_pw";
   const TARGET_SR = 16000;
   let micWS = null, micCtx = null, micNode = null, micStream = null, micOn = false;
+  let wakeLock = null;   // 마이크 켜는 동안 폰 화면이 안 꺼지게 (백그라운드 정지 방지)
 
   const adminToggle = document.getElementById("admin-toggle");
   const adminPw = document.getElementById("admin-pw");
@@ -351,6 +352,20 @@
     if (msg) alert(msg);
   }
 
+  // 화면 잠금/백그라운드 시 모바일은 오디오·WS 를 정지시킨다 → 마이크 켜는 동안 화면 유지.
+  async function requestWakeLock() {
+    try {
+      if ("wakeLock" in navigator) {
+        wakeLock = await navigator.wakeLock.request("screen");
+        wakeLock.addEventListener("release", () => { wakeLock = null; });
+      }
+    } catch (e) { /* 미지원/실패 — 치명적 아님 */ }
+  }
+  // 화면이 꺼졌다 돌아오면 wake lock 이 해제되므로, mic 가 켜져있으면 재획득
+  document.addEventListener("visibilitychange", () => {
+    if (micOn && wakeLock === null && document.visibilityState === "visible") requestWakeLock();
+  });
+
   async function micStart() {
     const pw = getPw();
     if (!pw) return;
@@ -388,16 +403,22 @@
     srcNode.connect(micNode);
     micNode.connect(micCtx.destination);
     micLevel.classList.remove("admin-hidden");
+    await requestWakeLock();
     micNode.onaudioprocess = (ev) => {
       const inp = ev.inputBuffer.getChannelData(0);
+      // WS 가 끊김/정지면 게이지도 0 으로 — '게이지는 움직이는데 전송은 안 됨' 착시 제거
+      if (!micWS || micWS.readyState !== 1) {
+        document.getElementById("mic-bar").style.width = "0%";
+        return;
+      }
       let peak = 0; for (let i = 0; i < inp.length; i++) peak = Math.max(peak, Math.abs(inp[i]));
       document.getElementById("mic-bar").style.width = Math.min(100, peak * 140) + "%";
-      if (!micWS || micWS.readyState !== 1) return;
       micWS.send(floatToInt16(downsample(inp, micCtx.sampleRate)).buffer);
     };
   }
   function micStop() {
     try { if (micWS && micWS.readyState === 1) micWS.send(JSON.stringify({ kind: "mic_stop" })); } catch {}
+    if (wakeLock) { try { wakeLock.release(); } catch {} wakeLock = null; }
     if (micNode) { micNode.disconnect(); micNode.onaudioprocess = null; micNode = null; }
     if (micCtx) { micCtx.close(); micCtx = null; }
     if (micStream) { micStream.getTracks().forEach((t) => t.stop()); micStream = null; }
