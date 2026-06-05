@@ -17,6 +17,7 @@ import { MeetingDO } from "./meeting_do";
 // HTML 을 텍스트로 번들. wrangler 가 esbuild loader 로 처리.
 import APP_HTML from "./static/app.html";
 import VIEWER_HTML from "./static/viewer.html";
+import ICON_PNG from "./static/icon.png";
 
 export { MeetingDO };
 
@@ -29,6 +30,10 @@ interface Env {
 const app = new Hono<{ Bindings: Env }>();
 
 app.get("/healthz", (c) => c.json({ ok: true }));
+
+app.get("/icon.png", () => new Response(ICON_PNG, {
+  headers: { "content-type": "image/png", "cache-control": "public, max-age=86400" },
+}));
 
 app.get("/subscribe/:key", async (c) => {
   if (!requireAdmin(c)) return c.text("unauthorized", 401);

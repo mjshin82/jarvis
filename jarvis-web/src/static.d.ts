@@ -3,3 +3,9 @@ declare module "*.html" {
   const content: string;
   export default content;
 }
+
+// PNG 을 바이너리(ArrayBuffer)로 import.
+declare module "*.png" {
+  const content: ArrayBuffer;
+  export default content;
+}

@@ -5,6 +5,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
 <title>Jarvis</title>
+<link rel="icon" type="image/png" href="/icon.png" />
 <style>
   :root {
     color-scheme: light dark;
@@ -30,6 +31,7 @@
     display: flex; align-items: center; gap: 12px;
   }
   header .title { font-size: 18px; font-weight: 600; }
+  .app-icon { width: 26px; height: 26px; border-radius: 6px; flex: none; }
   #meta-badge { font-size: 12px; color: var(--muted); }
   #conn { margin-left: auto; font-size: 13px; opacity: 0.8; }
   #conn.ok { color: var(--ko); opacity: 1; }
@@ -117,7 +119,8 @@
   </div>
 
   <header>
-    <span class="title" id="title">🤖 Jarvis</span>
+    <img class="app-icon" src="/icon.png" alt="" />
+    <span class="title" id="title">Jarvis</span>
     <span id="meta-badge"></span>
     <span id="conn">···</span>
   </header>
@@ -173,7 +176,7 @@
   function setView(v) {
     const nv = (v === "meeting" ? "meeting" : "home");
     document.body.dataset.view = nv;
-    $("title").textContent = nv === "meeting" ? meetingTitle : "🤖 Jarvis";
+    $("title").textContent = nv === "meeting" ? meetingTitle : "Jarvis";
     $("plus-menu").classList.add("hidden");   // 뷰 전환 시 메뉴 닫기
   }
   function showView(v) {

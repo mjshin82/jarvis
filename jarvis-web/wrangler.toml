@@ -11,6 +11,12 @@ type = "Text"
 globs = ["**/*.html"]
 fallthrough = true
 
+# PNG 을 바이너리(ArrayBuffer)로 import (헤더 아이콘 / 파비콘)
+[[rules]]
+type = "Data"
+globs = ["**/*.png"]
+fallthrough = true
+
 # Durable Object: 회의 키별 1개 인스턴스
 [[durable_objects.bindings]]
 name = "MEETING_DO"

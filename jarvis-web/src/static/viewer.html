@@ -5,6 +5,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>회의 자막</title>
+<link rel="icon" type="image/png" href="/icon.png" />
 <style>
   :root {
     color-scheme: light dark;
@@ -25,6 +26,7 @@
     border-bottom: 1px solid var(--border); background: var(--bg);
     display: flex; align-items: center; gap: 12px; }
   header .title { font-size: 18px; font-weight: 600; }
+  .app-icon { width: 26px; height: 26px; border-radius: 6px; flex: none; }
   #conn { margin-left: auto; font-size: 13px; opacity: 0.8; }
   #conn.ok { color: var(--ko); opacity: 1; }
   #conn.bad { color: #d33; opacity: 1; }
@@ -48,6 +50,7 @@
 </head>
 <body>
   <header>
+    <img class="app-icon" src="/icon.png" alt="" />
     <div class="title" id="title">🎤 회의 자막</div>
     <div id="conn">···</div>
   </header>
