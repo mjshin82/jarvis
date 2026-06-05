@@ -170,7 +170,6 @@
   // ---- 뷰 전환 (리로드 없음) ----
   let meetingTitle = "🎤 Meeting";   // applyMeta 가 갱신; 제목은 뷰에 따라 표시
   let micSource = "system";          // 회의 입력 소스 (system|remote) — 토글 라벨용
-  function pathIsMeeting() { return /\/meeting\/?$/.test(location.pathname); }
   function setView(v) {
     const nv = (v === "meeting" ? "meeting" : "home");
     document.body.dataset.view = nv;
@@ -180,11 +179,8 @@
   function showView(v) {
     const nv = (v === "meeting" ? "meeting" : "home");
     if (document.body.dataset.view === nv) return;
-    setView(nv);
-    const path = nv === "meeting" ? `/${encodeURIComponent(name)}/meeting` : `/${encodeURIComponent(name)}`;
-    history.pushState({ view: nv }, "", path);
+    setView(nv);   // URL 은 /{name} 유지 — /meeting 은 공개 뷰어
   }
-  window.addEventListener("popstate", () => setView(pathIsMeeting() ? "meeting" : "home"));
 
   // ---- TTS Audio + 채팅 버블 (홈) ----
   let audioCtx = null, playHead = 0;
@@ -506,7 +502,7 @@
   });
 
   // ---- 초기화 ----
-  setView(pathIsMeeting() ? "meeting" : "home");
+  setView("home");
   if (getPw()) { hideLogin(); connect(); } else { showLogin(); }
 })();
 </script>
