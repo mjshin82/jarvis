@@ -17,7 +17,7 @@ import asyncio
 import sys
 from dataclasses import dataclass, field
 
-import pyaudio
+import numpy as np
 from openai import AsyncOpenAI
 
 import config
@@ -69,24 +69,6 @@ class MeetingSetup:
         self.step_index += 1
 
 
-def _pick_physical_mic() -> int | None:
-    """BlackHole/Teams 등 가상장치 회피 후 첫 물리 마이크 인덱스."""
-    p = pyaudio.PyAudio()
-    skip = ("blackhole", "loopback", "aggregate", "teams", "soundflower")
-    chosen = None
-    try:
-        for i in range(p.get_device_count()):
-            info = p.get_device_info_by_index(i)
-            if info["maxInputChannels"] <= 0:
-                continue
-            if any(s in info["name"].lower() for s in skip):
-                continue
-            chosen = i
-            break
-    finally:
-        p.terminate()
-    return chosen
-
 
 class MeetingSession:
     """RealtimeSTT 한 인스턴스를 들고 다닌다. 메인 이벤트 루프에서 콜백을
@@ -102,7 +84,7 @@ class MeetingSession:
                  meta: MeetingMeta | None = None,
                  model: str = "small", realtime_model: str = "tiny",
                  language: str = "",
-                 use_remote: bool = False):
+                 ):
         self.log = log
         self.set_status = set_status
         self.llm = llm                       # 자비스 본체 LLM (폴백용)
@@ -110,7 +92,6 @@ class MeetingSession:
         self.model = model
         self.realtime_model = realtime_model
         self.language = language
-        self.use_remote = use_remote
         self.recorder = None
         self._loop = None
         self._final_q: asyncio.Queue[str | None] | None = None
@@ -166,11 +147,14 @@ class MeetingSession:
             self._tx_model = self.llm.model
             self._tx_label = f"local ({self._tx_model})"
 
-    def feed_remote(self, pcm_bytes) -> None:
-        """원격(폰) raw 16kHz Int16 PCM 을 RealtimeSTT 로 주입.
-        use_remote 회의에서 MicRouter tap 이 매 프레임 호출한다."""
-        if self.recorder is not None:
-            self.recorder.feed_audio(pcm_bytes, 16000)
+    def feed_block(self, block) -> None:
+        """MicRouter tap 이 매 블록 호출 — float32 [-1,1] 16kHz 블록을
+        int16 PCM bytes 로 변환해 RealtimeSTT 에 주입.
+        (numpy float32 를 그대로 feed_audio 에 주면 astype(int16) 로 0 이 됨)"""
+        if self.recorder is None:
+            return
+        pcm16 = (np.clip(block, -1.0, 1.0) * 32767).astype(np.int16).tobytes()
+        self.recorder.feed_audio(pcm16, 16000)
 
     async def start(self) -> None:
         from RealtimeSTT import AudioToTextRecorder   # 회의 모드 진입할 때만 import
@@ -197,11 +181,8 @@ class MeetingSession:
             compute_type="int8",
             level=30,   # WARNING 만
         )
-        if self.use_remote:
-            # 폰(원격) 오디오를 feed_remote()→feed_audio 로 주입 — 마이크 미점유
-            rec_kwargs["use_microphone"] = False
-        else:
-            rec_kwargs["input_device_index"] = _pick_physical_mic()
+        # RealtimeSTT 는 장치를 직접 잡지 않는다 — jarvis 가 feed_block 으로 먹인다.
+        rec_kwargs["use_microphone"] = False
 
         self.recorder = AudioToTextRecorder(**rec_kwargs)
 
