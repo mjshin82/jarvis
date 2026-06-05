@@ -110,9 +110,19 @@ class RemoteMicReceiver:
                 await ws.send(json.dumps({"kind": "mic_source", "source": self._last_source}))
             recv = asyncio.create_task(self._recv_loop(ws))
             send = asyncio.create_task(self._send_loop(ws))
-            done, pending = await asyncio.wait({recv, send}, return_when=asyncio.FIRST_COMPLETED)
-            for t in pending:
-                t.cancel()
+            try:
+                done, pending = await asyncio.wait({recv, send}, return_when=asyncio.FIRST_COMPLETED)
+            finally:
+                # 정상 종료든 외부 취소든 두 태스크를 반드시 정리
+                for t in (recv, send):
+                    if not t.done():
+                        t.cancel()
+                for t in (recv, send):
+                    try:
+                        await t
+                    except (asyncio.CancelledError, Exception):
+                        pass
+            # 비취소 예외는 위로 전파(바깥 _run 백오프 재연결)
             for t in done:
                 exc = t.exception()
                 if exc and not isinstance(exc, asyncio.CancelledError):
