@@ -3,9 +3,10 @@
  *
  * 라우트:
  *   GET  /healthz             상태 확인
- *   GET  /m/:key              viewer HTML (정적)
- *   GET  /subscribe/:key      WebSocket: viewer
- *   GET  /publish/:key        WebSocket: publisher (Bearer 토큰 필요)
+ *   GET  /:name               홈 HTML (정적, 로그인)
+ *   GET  /:name/meeting       회의 자막 뷰 HTML (정적, 로그인)
+ *   GET  /subscribe/:key      WebSocket: viewer (ADMIN_PASSWORD 필요)
+ *   GET  /publish/:key        WebSocket: publisher=jarvis (RELAY_TOKEN 필요)
  *   GET  /mic/:key            WebSocket: 마이크 송신 (ADMIN_PASSWORD 필요)
  *   GET  /mic-recv/:key       WebSocket: 마이크 수신=jarvis (RELAY_TOKEN 필요)
  *
@@ -15,6 +16,7 @@ import { Hono } from "hono";
 import { MeetingDO } from "./meeting_do";
 // HTML 을 텍스트로 번들. wrangler 가 esbuild loader 로 처리.
 import MEETING_HTML from "./static/meeting.html";
+import HOME_HTML from "./static/home.html";
 
 export { MeetingDO };
 
@@ -28,16 +30,8 @@ const app = new Hono<{ Bindings: Env }>();
 
 app.get("/healthz", (c) => c.json({ ok: true }));
 
-app.get("/m/:key", (c) => {
-  return new Response(MEETING_HTML, {
-    headers: {
-      "content-type": "text/html; charset=utf-8",
-      "cache-control": "no-store",
-    },
-  });
-});
-
 app.get("/subscribe/:key", async (c) => {
+  if (!requireAdmin(c)) return c.text("unauthorized", 401);
   if (c.req.header("Upgrade") !== "websocket") {
     return c.text("expected websocket", 426);
   }
@@ -67,6 +61,18 @@ app.get("/mic-recv/:key", async (c) => {
   if (!requireRelayToken(c)) return c.text("unauthorized", 401);
   if (c.req.header("Upgrade") !== "websocket") return c.text("expected websocket", 426);
   return forwardToDO(c.env, c.req.param("key"), "mic-recv", c.req.raw);
+});
+
+app.get("/:name/meeting", (c) => {
+  return new Response(MEETING_HTML, {
+    headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
+  });
+});
+
+app.get("/:name", (c) => {
+  return new Response(HOME_HTML, {
+    headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
+  });
 });
 
 app.notFound((c) => c.text("not found", 404));

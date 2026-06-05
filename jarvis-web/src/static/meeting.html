@@ -83,39 +83,39 @@
   @media (max-width: 600px) {
     .src { font-size: 17px; } .tx { font-size: 16px; }
   }
-  #admin-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
-               padding: 6px 12px; border-bottom: 1px solid #8883; font-size: 13px; }
-  #admin-bar button { font-size: 13px; padding: 6px 12px; border-radius: 8px; border: none;
-                      background: #2563eb; color: #fff; cursor: pointer; }
-  #admin-bar button.off { background: #dc2626; }
-  #admin-bar input { font-size: 13px; padding: 6px; width: 160px; }
   #mic-src { padding: 3px 8px; border-radius: 6px; background: #8882; }
   #mic-src.remote { background: #22c55e; color: #03240f; }
-  #mic-level { width: 120px; height: 8px; background: #ddd4; border-radius: 4px; overflow: hidden; }
-  #mic-bar { height: 100%; width: 0%; background: #22c55e; }
-  .admin-hidden { display: none !important; }
 </style>
 </head>
 <body>
+  <div id="login" style="position:fixed;inset:0;background:#000a;display:flex;flex-direction:column;gap:12px;align-items:center;justify-content:center;z-index:10;">
+    <div>🔒 Jarvis 로그인</div>
+    <input id="login-pw" type="password" placeholder="password" style="font-size:16px;padding:10px;width:240px;border-radius:8px;border:1px solid #888;" />
+    <button id="login-go" style="font-size:15px;padding:8px 16px;border-radius:10px;border:none;background:#2563eb;color:#fff;">들어가기</button>
+  </div>
   <header>
     <div class="title" id="title">🎤 회의 자막</div>
     <div class="badge" id="meta-badge"></div>
+    <span id="mic-src"></span>
     <div class="conn" id="conn">···</div>
   </header>
-  <div id="admin-bar">
-    <button id="admin-toggle">🔒 admin</button>
-    <input id="admin-pw" type="password" placeholder="admin password" class="admin-hidden" />
-    <button id="admin-unlock" class="admin-hidden">잠금 해제</button>
-    <button id="mic-toggle" class="admin-hidden">🎙️ 마이크 켜기</button>
-    <div id="mic-level" class="admin-hidden"><div id="mic-bar"></div></div>
-    <span id="mic-src"></span>
-  </div>
   <main id="log"></main>
   <div class="lockbar" id="lockbar">↓ 새 자막 보기</div>
 
 <script>
 (() => {
-  const key = location.pathname.replace(/^\/m\//, "");
+  const ADMIN_KEY = "jarvis_admin_pw";
+  const key = decodeURIComponent(location.pathname.replace(/^\//, "").replace(/\/.*$/, "")) || "jarvis";
+  const getPw = () => localStorage.getItem(ADMIN_KEY) || "";
+  const loginEl = document.getElementById("login");
+  function showLogin() { loginEl.style.display = "flex"; }
+  function hideLogin() { loginEl.style.display = "none"; }
+  document.getElementById("login-go").addEventListener("click", () => {
+    const pw = document.getElementById("login-pw").value.trim();
+    if (!pw) return;
+    localStorage.setItem(ADMIN_KEY, pw); hideLogin(); connect();
+  });
+  if (getPw()) hideLogin(); else showLogin();
   const log = document.getElementById("log");
   const titleEl = document.getElementById("title");
   const metaBadge = document.getElementById("meta-badge");
@@ -264,7 +264,8 @@
 
   function connect() {
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
-    ws = new WebSocket(`${proto}//${location.host}/subscribe/${encodeURIComponent(key)}`);
+    if (!getPw()) { showLogin(); return; }
+    ws = new WebSocket(`${proto}//${location.host}/subscribe/${encodeURIComponent(key)}?token=${encodeURIComponent(getPw())}`);
     connEl.textContent = "연결 중…";
     connEl.className = "conn";
 
@@ -282,7 +283,11 @@
         console.error("bad message", e, m.data);
       }
     });
-    ws.addEventListener("close", () => {
+    ws.addEventListener("close", (event) => {
+      if (event.code === 1006 || event.code === 1008) {
+        localStorage.removeItem(ADMIN_KEY); showLogin();
+        connEl.textContent = "인증 필요"; connEl.className = "conn bad"; return;
+      }
       connEl.textContent = `재연결 중 (${reconnectDelay/1000}s)…`;
       connEl.className = "conn bad";
       setTimeout(connect, reconnectDelay);
@@ -293,152 +298,9 @@
     });
   }
 
-  // ---- admin 인증 + mic 캡처 ----
-  const ADMIN_KEY = "jarvis_admin_pw";
-  const TARGET_SR = 16000;
-  let micWS = null, micCtx = null, micNode = null, micStream = null, micOn = false;
-  let wakeLock = null;   // 마이크 켜는 동안 폰 화면이 안 꺼지게 (백그라운드 정지 방지)
-
-  const adminToggle = document.getElementById("admin-toggle");
-  const adminPw = document.getElementById("admin-pw");
-  const adminUnlock = document.getElementById("admin-unlock");
-  const micToggle = document.getElementById("mic-toggle");
-  const micLevel = document.getElementById("mic-level");
-
-  function showAdminControls() {
-    micToggle.classList.remove("admin-hidden");
-    adminPw.classList.add("admin-hidden");
-    adminUnlock.classList.add("admin-hidden");
-    adminToggle.textContent = "🔓 admin";
-  }
-  function getPw() { return localStorage.getItem(ADMIN_KEY) || ""; }
-
-  adminToggle.addEventListener("click", () => {
-    if (getPw()) { showAdminControls(); return; }   // 이미 해제됨
-    adminPw.classList.toggle("admin-hidden");
-    adminUnlock.classList.toggle("admin-hidden");
-  });
-  adminUnlock.addEventListener("click", () => {
-    const pw = adminPw.value.trim();
-    if (!pw) return;
-    localStorage.setItem(ADMIN_KEY, pw);
-    showAdminControls();
-  });
-  if (getPw()) showAdminControls();   // 재방문 자동 해제
-
-  function downsample(input, inRate) {
-    if (inRate === TARGET_SR) return input;
-    const ratio = inRate / TARGET_SR;
-    const outLen = Math.floor(input.length / ratio);
-    const out = new Float32Array(outLen);
-    for (let i = 0; i < outLen; i++) out[i] = input[Math.floor(i * ratio)];
-    return out;
-  }
-  function floatToInt16(f32) {
-    const out = new Int16Array(f32.length);
-    for (let i = 0; i < f32.length; i++) {
-      const s = Math.max(-1, Math.min(1, f32[i]));
-      out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
-    }
-    return out;
-  }
-
-  // 마이크를 비자발적으로 잃었을 때 정리 + UI 리셋 + 알림 (last-wins 로 밀려남 등)
-  function loseMic(msg) {
-    micStop();
-    micOn = false;
-    micToggle.textContent = "🎙️ 마이크 켜기";
-    micToggle.classList.remove("off");
-    if (msg) alert(msg);
-  }
-
-  // 화면 잠금/백그라운드 시 모바일은 오디오·WS 를 정지시킨다 → 마이크 켜는 동안 화면 유지.
-  async function requestWakeLock() {
-    try {
-      if ("wakeLock" in navigator) {
-        wakeLock = await navigator.wakeLock.request("screen");
-        wakeLock.addEventListener("release", () => { wakeLock = null; });
-      }
-    } catch (e) { /* 미지원/실패 — 치명적 아님 */ }
-  }
-  // 화면이 꺼졌다 돌아오면 wake lock 이 해제되므로, mic 가 켜져있으면 재획득
-  document.addEventListener("visibilitychange", () => {
-    if (micOn && wakeLock === null && document.visibilityState === "visible") requestWakeLock();
-  });
-
-  async function micStart() {
-    const pw = getPw();
-    if (!pw) return;
-    const proto = location.protocol === "https:" ? "wss:" : "ws:";
-    micWS = new WebSocket(`${proto}//${location.host}/mic/${encodeURIComponent(key)}?token=${encodeURIComponent(pw)}`);
-    micWS.binaryType = "arraybuffer";
-    micWS.onopen = () => { micWS.send(JSON.stringify({ kind: "mic_start" })); };
-    micWS.onmessage = (e) => {
-      let m; try { m = JSON.parse(e.data); } catch { return; }
-      if (m.kind === "kicked") {
-        // 다른 기기가 마이크를 인수
-        loseMic("다른 기기가 마이크를 가져갔습니다.");
-      } else if (m.kind === "no_receiver") {
-        // jarvis 가 이 방(key)에 안 붙어있음 — 송신은 되지만 받는 쪽이 없음
-        const badge = document.getElementById("mic-src");
-        badge.textContent = "⚠ 자비스 미연결";
-        badge.classList.remove("remote");
-      }
-    };
-    micWS.onclose = (e) => {
-      if (e.code === 1006 || e.code === 1008) {
-        localStorage.removeItem(ADMIN_KEY);
-        adminToggle.textContent = "🔒 admin";
-        micToggle.classList.add("admin-hidden");
-        loseMic("admin 인증 실패 — 비밀번호를 다시 입력하세요.");
-      } else if (micOn) {
-        // 사용자가 끈 게 아닌데 닫힘 = 외부 요인으로 마이크를 잃음(kicked 메시지 유실 등)
-        loseMic("마이크 연결이 종료되었습니다 (다른 기기가 가져갔을 수 있음).");
-      }
-    };
-    micStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
-    micCtx = new (window.AudioContext || window.webkitAudioContext)();
-    const srcNode = micCtx.createMediaStreamSource(micStream);
-    micNode = micCtx.createScriptProcessor(4096, 1, 1);
-    srcNode.connect(micNode);
-    micNode.connect(micCtx.destination);
-    micLevel.classList.remove("admin-hidden");
-    await requestWakeLock();
-    micNode.onaudioprocess = (ev) => {
-      const inp = ev.inputBuffer.getChannelData(0);
-      // WS 가 끊김/정지면 게이지도 0 으로 — '게이지는 움직이는데 전송은 안 됨' 착시 제거
-      if (!micWS || micWS.readyState !== 1) {
-        document.getElementById("mic-bar").style.width = "0%";
-        return;
-      }
-      let peak = 0; for (let i = 0; i < inp.length; i++) peak = Math.max(peak, Math.abs(inp[i]));
-      document.getElementById("mic-bar").style.width = Math.min(100, peak * 140) + "%";
-      micWS.send(floatToInt16(downsample(inp, micCtx.sampleRate)).buffer);
-    };
-  }
-  function micStop() {
-    try { if (micWS && micWS.readyState === 1) micWS.send(JSON.stringify({ kind: "mic_stop" })); } catch {}
-    if (wakeLock) { try { wakeLock.release(); } catch {} wakeLock = null; }
-    if (micNode) { micNode.disconnect(); micNode.onaudioprocess = null; micNode = null; }
-    if (micCtx) { micCtx.close(); micCtx = null; }
-    if (micStream) { micStream.getTracks().forEach((t) => t.stop()); micStream = null; }
-    if (micWS) { try { micWS.close(); } catch {} micWS = null; }
-    document.getElementById("mic-bar").style.width = "0%";
-    micLevel.classList.add("admin-hidden");
-  }
-  micToggle.addEventListener("click", async () => {
-    micOn = !micOn;
-    micToggle.textContent = micOn ? "🎙️ 마이크 끄기" : "🎙️ 마이크 켜기";
-    micToggle.classList.toggle("off", micOn);
-    if (micOn) {
-      try { await micStart(); }
-      catch (e) { alert("마이크 권한 실패: " + e.message); micOn = false; micToggle.textContent = "🎙️ 마이크 켜기"; micToggle.classList.remove("off"); }
-    } else micStop();
-  });
-
   if (!key) {
     titleEl.textContent = "회의 키가 URL 에 없습니다.";
-  } else {
+  } else if (getPw()) {
     connect();
   }
 })();

@@ -1,0 +1,173 @@
+<!-- jarvis-web/src/static/home.html -->
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Jarvis</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, sans-serif; margin: 0; display: flex; flex-direction: column; height: 100vh; }
+  header { display: flex; gap: 10px; align-items: center; padding: 10px 14px; border-bottom: 1px solid #8883; }
+  header .title { font-weight: 600; }
+  #mic-src { padding: 3px 8px; border-radius: 6px; background: #8882; font-size: 13px; }
+  #mic-src.remote { background: #22c55e; color: #03240f; }
+  #conn { margin-left: auto; font-size: 13px; opacity: 0.7; }
+  #controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 10px 14px; border-bottom: 1px solid #8883; }
+  button { font-size: 15px; padding: 8px 16px; border-radius: 10px; border: none; background: #2563eb; color: #fff; cursor: pointer; }
+  button.off { background: #dc2626; }
+  a.navbtn { font-size: 15px; padding: 8px 16px; border-radius: 10px; background: #6b7280; color: #fff; text-decoration: none; }
+  #mic-level { width: 120px; height: 8px; background: #ddd4; border-radius: 4px; overflow: hidden; }
+  #mic-bar { height: 100%; width: 0%; background: #22c55e; }
+  #chat { flex: 1; padding: 16px; overflow-y: auto; opacity: 0.6; }
+  #login { position: fixed; inset: 0; background: #000a; display: flex; flex-direction: column;
+           gap: 12px; align-items: center; justify-content: center; z-index: 10; }
+  #login input { font-size: 16px; padding: 10px; width: 240px; border-radius: 8px; border: 1px solid #888; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+  <div id="login">
+    <div>🔒 Jarvis 로그인</div>
+    <input id="login-pw" type="password" placeholder="password" />
+    <button id="login-go">들어가기</button>
+  </div>
+
+  <header>
+    <span class="title">🤖 Jarvis</span>
+    <span id="mic-src"></span>
+    <span id="conn">···</span>
+  </header>
+  <div id="controls">
+    <button id="mic-toggle">🎙️ 마이크 켜기</button>
+    <div id="mic-level" class="hidden"><div id="mic-bar"></div></div>
+    <a class="navbtn" id="to-meeting" href="#">🗣️ 회의 모드로</a>
+  </div>
+  <main id="chat">💬 음성 대화는 다음 단계에서 제공됩니다.</main>
+
+<script>
+(() => {
+  const ADMIN_KEY = "jarvis_admin_pw";
+  const TARGET_SR = 16000;
+  const name = decodeURIComponent(location.pathname.replace(/^\//, "").replace(/\/.*$/, "")) || "jarvis";
+  const $ = (id) => document.getElementById(id);
+  document.getElementById("to-meeting").href = `/${encodeURIComponent(name)}/meeting`;
+
+  function getPw() { return localStorage.getItem(ADMIN_KEY) || ""; }
+  function showLogin() { $("login").classList.remove("hidden"); }
+  function hideLogin() { $("login").classList.add("hidden"); }
+  $("login-go").addEventListener("click", () => {
+    const pw = $("login-pw").value.trim();
+    if (!pw) return;
+    localStorage.setItem(ADMIN_KEY, pw);
+    hideLogin();
+    connect();
+  });
+  if (getPw()) hideLogin(); else showLogin();
+
+  // ---- 자막/상태 구독 (소스 배지) ----
+  let ws = null, reconnectDelay = 500;
+  function connect() {
+    const pw = getPw();
+    if (!pw) { showLogin(); return; }
+    const proto = location.protocol === "https:" ? "wss:" : "ws:";
+    ws = new WebSocket(`${proto}//${location.host}/subscribe/${encodeURIComponent(name)}?token=${encodeURIComponent(pw)}`);
+    ws.addEventListener("open", () => { $("conn").textContent = "● live"; reconnectDelay = 500; });
+    ws.addEventListener("message", (m) => {
+      try {
+        const ev = JSON.parse(m.data);
+        if (ev.kind === "mic_source") {
+          $("mic-src").textContent = ev.source === "remote" ? "🎚️ 원격(폰)" : "🎚️ 시스템";
+          $("mic-src").classList.toggle("remote", ev.source === "remote");
+        }
+      } catch {}
+    });
+    ws.addEventListener("close", (e) => {
+      if (e.code === 1006 || e.code === 1008) {
+        localStorage.removeItem(ADMIN_KEY);
+        $("conn").textContent = "인증 필요";
+        showLogin();
+        return;
+      }
+      $("conn").textContent = `재연결 (${reconnectDelay/1000}s)…`;
+      setTimeout(connect, reconnectDelay);
+      reconnectDelay = Math.min(reconnectDelay * 2, 8000);
+    });
+    ws.addEventListener("error", () => { try { ws.close(); } catch {} });
+  }
+  if (getPw()) connect();
+
+  // ---- mic-take (홈으로 이동) ----
+  let micWS = null, micCtx = null, micNode = null, micStream = null, micOn = false, wakeLock = null;
+  function downsample(input, inRate) {
+    if (inRate === TARGET_SR) return input;
+    const ratio = inRate / TARGET_SR, outLen = Math.floor(input.length / ratio);
+    const out = new Float32Array(outLen);
+    for (let i = 0; i < outLen; i++) out[i] = input[Math.floor(i * ratio)];
+    return out;
+  }
+  function floatToInt16(f32) {
+    const out = new Int16Array(f32.length);
+    for (let i = 0; i < f32.length; i++) {
+      const s = Math.max(-1, Math.min(1, f32[i]));
+      out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+    }
+    return out;
+  }
+  async function requestWakeLock() {
+    try { if ("wakeLock" in navigator) { wakeLock = await navigator.wakeLock.request("screen"); wakeLock.addEventListener("release", () => { wakeLock = null; }); } } catch {}
+  }
+  document.addEventListener("visibilitychange", () => {
+    if (micOn && wakeLock === null && document.visibilityState === "visible") requestWakeLock();
+  });
+  function loseMic(msg) {
+    micStop(); micOn = false; $("mic-toggle").textContent = "🎙️ 마이크 켜기"; $("mic-toggle").classList.remove("off");
+    if (msg) alert(msg);
+  }
+  async function micStart() {
+    const pw = getPw();
+    if (!pw) { showLogin(); return; }
+    const proto = location.protocol === "https:" ? "wss:" : "ws:";
+    micWS = new WebSocket(`${proto}//${location.host}/mic/${encodeURIComponent(name)}?token=${encodeURIComponent(pw)}`);
+    micWS.binaryType = "arraybuffer";
+    micWS.onopen = () => micWS.send(JSON.stringify({ kind: "mic_start" }));
+    micWS.onmessage = (e) => { try { if (JSON.parse(e.data).kind === "kicked") loseMic("다른 기기가 마이크를 가져갔습니다."); } catch {} };
+    micWS.onclose = (e) => {
+      if (e.code === 1006 || e.code === 1008) { localStorage.removeItem(ADMIN_KEY); showLogin(); loseMic("인증 실패 — 다시 로그인하세요."); }
+      else if (micOn) loseMic("마이크 연결이 종료되었습니다.");
+    };
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+    micCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const srcNode = micCtx.createMediaStreamSource(micStream);
+    micNode = micCtx.createScriptProcessor(4096, 1, 1);
+    srcNode.connect(micNode); micNode.connect(micCtx.destination);
+    $("mic-level").classList.remove("hidden");
+    await requestWakeLock();
+    micNode.onaudioprocess = (ev) => {
+      const inp = ev.inputBuffer.getChannelData(0);
+      if (!micWS || micWS.readyState !== 1) { $("mic-bar").style.width = "0%"; return; }
+      let peak = 0; for (let i = 0; i < inp.length; i++) peak = Math.max(peak, Math.abs(inp[i]));
+      $("mic-bar").style.width = Math.min(100, peak * 140) + "%";
+      micWS.send(floatToInt16(downsample(inp, micCtx.sampleRate)).buffer);
+    };
+  }
+  function micStop() {
+    try { if (micWS && micWS.readyState === 1) micWS.send(JSON.stringify({ kind: "mic_stop" })); } catch {}
+    if (wakeLock) { try { wakeLock.release(); } catch {} wakeLock = null; }
+    if (micNode) { micNode.disconnect(); micNode.onaudioprocess = null; micNode = null; }
+    if (micCtx) { micCtx.close(); micCtx = null; }
+    if (micStream) { micStream.getTracks().forEach((t) => t.stop()); micStream = null; }
+    if (micWS) { try { micWS.close(); } catch {} micWS = null; }
+    $("mic-bar").style.width = "0%"; $("mic-level").classList.add("hidden");
+  }
+  $("mic-toggle").addEventListener("click", async () => {
+    micOn = !micOn;
+    $("mic-toggle").textContent = micOn ? "🎙️ 마이크 끄기" : "🎙️ 마이크 켜기";
+    $("mic-toggle").classList.toggle("off", micOn);
+    if (micOn) { try { await micStart(); } catch (e) { alert("마이크 권한 실패: " + e.message); micOn = false; $("mic-toggle").textContent = "🎙️ 마이크 켜기"; $("mic-toggle").classList.remove("off"); } }
+    else micStop();
+  });
+})();
+</script>
+</body>
+</html>

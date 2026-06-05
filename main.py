@@ -68,7 +68,7 @@ async def main():
         mic.router.on_switch = _on_mic_switch
         remote_mic_monitor = asyncio.create_task(mic.router.run_idle_monitor())
         cap_base = config.RELAY_URL.replace("wss://", "https://").replace("ws://", "http://")
-        cap_url = f"{cap_base}/m/{config.ROOM_KEY}"
+        cap_url = f"{cap_base}/{config.ROOM_KEY}"
         box_width = max(len(cap_url) + 4, 60)
         border = "─" * box_width
         console.log("")
@@ -386,7 +386,7 @@ async def main():
                     sess._relay = relay   # stop() 에서 close
                     # http 보기 URL 안내 (ws → http 로 단순 치환)
                     view_base = config.RELAY_URL.replace("wss://", "https://").replace("ws://", "http://")
-                    view_url = f"{view_base}/m/{meta.key}"
+                    view_url = f"{view_base}/{meta.key}/meeting"
                     box_width = max(len(view_url) + 4, 60)
                     border = "─" * box_width
                     console.log("")
