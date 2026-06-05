@@ -24,8 +24,8 @@ models/
 # 런타임 로그
 *.log
 
-# meeting-web (Node)
-meeting-web/node_modules/
-meeting-web/.dev.vars
-meeting-web/.wrangler/
-meeting-web/dist/
+# jarvis-web (Node)
+jarvis-web/node_modules/
+jarvis-web/.dev.vars
+jarvis-web/.wrangler/
+jarvis-web/dist/
