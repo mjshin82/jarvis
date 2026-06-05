@@ -299,8 +299,8 @@ async def main():
     def in_meeting_setup() -> bool:
         return meeting_setup["obj"] is not None
 
-    async def start_meeting_setup():
-        """/meet 진입 → 메타 입력 단계 시작. 첫 질문 출력."""
+    async def start_meeting_setup(use_remote=False):
+        """/meet 진입 → (입력 단계 없으면) 곧장 회의 시작."""
         nonlocal response
         if meeting_session["obj"] is not None:
             console.log("회의 모드가 이미 진행 중입니다.")
@@ -314,7 +314,7 @@ async def main():
         setup = MeetingSetup(default_my_name=config.USER_NAME)
         if setup.done:
             # 입력 단계 없음(상대방 이름 안 받음) → 곧장 회의 시작
-            await _begin_meeting(setup.meta)
+            await _begin_meeting(setup.meta, use_remote)
             return
         meeting_setup["obj"] = setup
         console.log(f"🎤 회의 시작 전 정보를 입력해주세요. (내 이름: {config.USER_NAME}, Esc 로 취소)")
@@ -351,10 +351,14 @@ async def main():
         meeting_setup["obj"] = None
         await _begin_meeting(meta)
 
-    async def _begin_meeting(meta) -> None:
+    async def _begin_meeting(meta, use_remote=False) -> None:
         """메타가 모인 다음 호출. 본체 마이크 양보 + RealtimeSTT 시작.
+        use_remote 면 폰(원격) 마이크를 RealtimeSTT 로 먹인다.
         RELAY_URL/RELAY_TOKEN 이 설정돼 있으면 outbound ws 로 자막 중계도 활성."""
         from live_translate import MeetingSession
+        if use_remote and not config.REMOTE_MIC_ENABLED:
+            console.log("⚠ 원격 마이크가 비활성(REMOTE_MIC_ENABLED) — 시스템 마이크로 진행합니다.")
+            use_remote = False
         mic.pause()
         try:
             sess = MeetingSession(
@@ -364,10 +368,16 @@ async def main():
                 meta=meta,
                 model=config.MEET_STT_MODEL,
                 realtime_model=config.MEET_STT_REALTIME_MODEL,
+                use_remote=use_remote,
             )
             await sess.start()
             meeting_session["obj"] = sess
-            console.log(f"🎤 회의를 시작합니다. 회의 번호: {meta.key}")
+            if use_remote:
+                # 폰 raw 프레임을 메인 VAD 대신 RealtimeSTT 로 우회
+                mic.router.set_tap(sess.feed_remote)
+                if mic.router.active != "remote":
+                    console.log("⚠ 폰이 연결돼 있지 않습니다 — 폰에서 마이크를 켜세요.")
+            console.log(f"🎤 회의를 시작합니다 (소스: {'폰' if use_remote else '시스템'}). 회의 번호: {meta.key}")
             # 외부 중계 활성 (옵션) — 자막 페이지 URL 을 박스로 강조 표시
             if config.RELAY_URL and config.RELAY_TOKEN:
                 from relay_client import RelayClient
@@ -408,6 +418,7 @@ async def main():
         try:
             await sess.stop()
         finally:
+            mic.router.set_tap(None)   # 원격 프레임을 메인 경로로 복귀
             meeting_session["obj"] = None
             mic.resume()
             console.set_status(None)
