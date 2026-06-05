@@ -1,96 +1,110 @@
-# 회의 모드 원격 마이크 Implementation Plan
+# 회의 모드 원격 마이크 (동적) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** `/meet phone` 로 회의 모드에서 폰(원격) 마이크를 쓸 수 있게 한다 — RealtimeSTT 를 `use_microphone=False` 로 만들고 MicRouter tap 으로 폰 오디오를 `feed_audio` 한다.
+**Goal:** 회의 모드가 MicRouter 의 현재 활성 소스(시스템/폰)를 동적으로 따르게 한다 — RealtimeSTT 는 항상 `use_microphone=False`, jarvis 가 활성 소스 블록을 `feed_audio` 로 계속 먹임. 회의 중 소스 전환 자유, `/meet` 인자 없음.
 
-**Architecture:** `MicRouter` 에 raw-프레임 tap 을 추가해, tap 이 설정되면 원격 프레임이 메인 VAD 큐 대신 회의 세션으로 우회한다. `MeetingSession` 은 `use_remote` 면 마이크를 안 잡고 `feed_remote()` 로 주입받는다. `/meet phone|system` 으로 진입 시 소스를 고정 선택한다.
+**Architecture:** 정적 설계(이 미머지 브랜치에 구현됨)를 개정한다. MicRouter tap 을 원격 raw 대신 **블록 레벨(`_sink_local`/`_sink_remote`)** 로 옮겨 활성 소스 블록을 우회시킨다. MeetingSession 은 `use_microphone=False` 로만 만들고 `feed_block(float32)→int16 bytes→feed_audio` 로 받는다. 회의 진입 시 `mic.pause()` 를 호출하지 않아(시스템 마이크 캡처 유지) tap 만으로 라우팅한다.
 
-**Tech Stack:** Python 3.11 (asyncio, RealtimeSTT 1.0.2 `feed_audio`/`use_microphone`, pytest).
+**Tech Stack:** Python 3.11 (asyncio, numpy, RealtimeSTT 1.0.2 feed_audio, pytest).
 
 ---
 
-## 파일 구조
+## 파일 구조 (개정 대상 — 모두 이미 존재)
 
-| 파일 | 변경 |
+| 파일 | 개정 |
 |------|------|
-| `mic_source.py` (`MicRouter`) | `set_tap(fn)`/`_tap`, `on_remote_frame` 우회, `active` 프로퍼티 |
-| `live_translate.py` (`MeetingSession`) | `use_remote` 파라미터, recorder 분기, `feed_remote()` |
-| `commands.py` (`/meet`) | `phone`/`system` 인자 → `start_meeting(use_remote)` |
-| `main.py` | `start_meeting_setup(use_remote)` → `_begin_meeting(meta, use_remote)`, tap 설정/해제, 경고 |
-| `tests/test_mic_router.py` | tap 우회 테스트 추가 |
-| `tests/test_meeting_session.py` | 신규 — use_remote/feed_remote |
-| `tests/test_meet_command.py` | 신규 — /meet 인자 |
+| `mic_source.py` (`MicRouter`) | tap 을 `_sink_local`/`_sink_remote` 블록 레벨로 이동, `on_remote_frame` 의 tap 분기 제거 |
+| `live_translate.py` (`MeetingSession`) | `use_remote` 제거, 항상 `use_microphone=False`, `feed_remote`→`feed_block`(float32→int16), `_pick_physical_mic`/`import pyaudio` 제거, `import numpy as np` 추가 |
+| `commands.py` (`/meet`) | `phone`/`system` 인자 제거 |
+| `main.py` | `_begin_meeting(meta)` — pause/gating/경고 제거, `set_tap(sess.feed_block)`, stop 시 `set_tap(None)`; `start_meeting_setup()` 무인자 |
+| `tests/test_mic_router.py` | 블록 레벨 tap 테스트로 교체 |
+| `tests/test_meeting_session.py` | feed_block 변환 테스트로 교체 |
+| `tests/test_meet_command.py` | 무인자 테스트로 교체 |
 
 전제: `cd /Users/oracle/Documents/concode/jarvis`, pytest 는 `.venv/bin/python -m pytest`.
 
 ---
 
-## Task 1: MicRouter — set_tap + on_remote_frame 우회 + active 프로퍼티
+## Task 1: MicRouter — tap 을 블록 레벨로 이동
 
-tap 이 설정되면 원격 raw 프레임을 tap 으로 보내고 메인 큐를 우회한다. 회의 모드에서 폰 오디오를 RealtimeSTT 로 보낼 때 사용.
+활성 소스의 블록(float32 512)을 tap 으로 우회. `on_remote_frame` 은 tap 분기 제거(원복).
 
 **Files:**
 - Modify: `mic_source.py` (`MicRouter`)
-- Test: `tests/test_mic_router.py` (추가)
+- Test: `tests/test_mic_router.py` (기존 tap 테스트 교체)
 
-- [ ] **Step 1: 실패 테스트 추가**
+- [ ] **Step 1: 기존 tap 테스트를 블록 레벨로 교체**
 
-`tests/test_mic_router.py` 끝에 추가:
+`tests/test_mic_router.py` 의 `test_tap_diverts_remote_frames_and_bypasses_queue` 함수를 통째로 다음으로 **교체**(이름도 변경):
 ```python
-def test_tap_diverts_remote_frames_and_bypasses_queue():
+def test_tap_diverts_active_source_blocks_and_bypasses_queue():
     q = queue.Queue()
     tapped = []
-    fed = []
-
-    class Rem:
-        def feed(self, b): fed.append(b)
-        def reset(self): pass
-
-    r = MicRouter(q, local=_FakeLocal(), remote=Rem())
-    r.set_override("remote")          # tap 없으면 큐로 갈 상황
-    r.set_tap(tapped.append)
-    r.on_remote_frame(b"\x01\x02")
-    assert tapped == [b"\x01\x02"]    # tap 으로 우회
-    assert fed == []                  # remote.feed 안 탐
-    assert q.empty()                  # 메인 큐 미적재
-
-    r.set_tap(None)                   # 해제 → 기존 경로 복귀
-    r.on_remote_frame(b"\x03\x04")
-    assert tapped == [b"\x01\x02"]    # tap 은 더 안 늘어남
-    assert fed == [b"\x03\x04"]       # remote.feed 로 감
-
-
-def test_active_property():
-    q = queue.Queue()
     r = MicRouter(q, local=_FakeLocal(), remote=_FakeRemote())
-    assert r.active == "local"
+    r.set_tap(tapped.append)
+
+    # local active → _sink_local 블록이 tap 으로 (큐 미적재)
+    b1 = _block(0.1)
+    r._sink_local(b1)
+    assert tapped == [b1]
+    assert q.empty()
+
+    # remote active → _sink_remote 블록이 tap 으로
     r.set_override("remote")
-    assert r.active == "remote"
+    b2 = _block(0.2)
+    r._sink_remote(b2)
+    assert tapped == [b1, b2]
+    assert q.empty()
+
+    # 비활성 소스 블록은 무시 (active=remote 인데 local sink 호출)
+    r._sink_local(_block(0.9))
+    assert tapped == [b1, b2]
+
+    # tap 해제 → 큐로 복귀
+    r.set_tap(None)
+    r._sink_remote(_block(0.3))
+    assert q.qsize() == 1
 ```
-(`_FakeLocal`/`_FakeRemote` 는 이 파일에 이미 있음.)
+(`_block`, `_FakeLocal`, `_FakeRemote` 는 이 파일에 이미 있음. `test_active_property` 는 그대로 둔다.)
 
 - [ ] **Step 2: 실패 확인**
 
-Run: `.venv/bin/python -m pytest tests/test_mic_router.py::test_tap_diverts_remote_frames_and_bypasses_queue -v`
-Expected: FAIL — `AttributeError: 'MicRouter' object has no attribute 'set_tap'`
+Run: `.venv/bin/python -m pytest tests/test_mic_router.py::test_tap_diverts_active_source_blocks_and_bypasses_queue -v`
+Expected: FAIL — 현재 `_sink_local`/`_sink_remote` 는 tap 을 모름(블록이 tap 으로 안 감).
 
 - [ ] **Step 3: 구현 (mic_source.py)**
 
-(a) `MicRouter.__init__` 에서 `self._suppressed = False` 다음 줄에 추가:
+(a) `_sink_local`/`_sink_remote` 를 교체. 현재:
 ```python
-        self._tap = None   # 설정되면 원격 raw 프레임을 여기로 우회(회의 모드 등)
+    def _sink_local(self, block):
+        if self._active == "local":
+            self._q.put(block)
+
+    def _sink_remote(self, block):
+        if self._active == "remote":
+            self._q.put(block)
+```
+교체:
+```python
+    def _sink_local(self, block):
+        if self._active != "local":
+            return
+        if self._tap is not None:          # 회의 모드: 활성 소스 블록을 우회
+            self._tap(block)
+            return
+        self._q.put(block)
+
+    def _sink_remote(self, block):
+        if self._active != "remote":
+            return
+        if self._tap is not None:
+            self._tap(block)
+            return
+        self._q.put(block)
 ```
 
-(b) `on_remote_frame` 을 교체. 현재:
-```python
-    def on_remote_frame(self, pcm_bytes):
-        if self._suppressed:
-            return
-        self.note_remote_activity(self._clock())
-        self.remote.feed(pcm_bytes)
-```
-교체 후:
+(b) `on_remote_frame` 에서 tap 분기 제거(원복). 현재:
 ```python
     def on_remote_frame(self, pcm_bytes):
         if self._tap is not None:
@@ -102,17 +116,15 @@ Expected: FAIL — `AttributeError: 'MicRouter' object has no attribute 'set_tap
         self.note_remote_activity(self._clock())
         self.remote.feed(pcm_bytes)
 ```
-
-(c) `set_tap` 메서드 + `active` 프로퍼티 추가 (예: `on_remote_frame` 아래):
+교체:
 ```python
-    def set_tap(self, fn):
-        """원격 raw 프레임을 외부 소비자로 우회. None 으로 해제(기존 경로 복귀)."""
-        self._tap = fn
-
-    @property
-    def active(self):
-        return self._active
+    def on_remote_frame(self, pcm_bytes):
+        if self._suppressed:
+            return
+        self.note_remote_activity(self._clock())
+        self.remote.feed(pcm_bytes)
 ```
+(`set_tap`/`active`/`_tap` 필드는 그대로 둔다.)
 
 - [ ] **Step 4: 통과 확인**
 
@@ -123,24 +135,26 @@ Expected: PASS (전부). 그리고 `.venv/bin/python -m pytest tests/ -q` → 0 
 
 ```bash
 git add mic_source.py tests/test_mic_router.py
-git commit -m "feat: MicRouter.set_tap — 원격 프레임 우회(회의 모드용) + active 프로퍼티"
+git commit -m "refactor: MicRouter tap 을 블록 레벨로 — 회의가 활성 소스를 동적 추종"
 ```
 
 ---
 
-## Task 2: MeetingSession — use_remote + feed_remote
+## Task 2: MeetingSession — 항상 use_microphone=False + feed_block
 
-`use_remote` 면 RealtimeSTT 가 마이크를 안 잡고, `feed_remote(pcm_bytes)` 로 폰 오디오를 주입받는다.
+`use_remote` 제거, recorder 는 항상 마이크 미점유, float32 블록을 int16 으로 변환해 주입.
 
 **Files:**
 - Modify: `live_translate.py` (`MeetingSession`)
-- Test: `tests/test_meeting_session.py` (신규)
+- Test: `tests/test_meeting_session.py` (교체)
 
-- [ ] **Step 1: 실패 테스트 작성**
+- [ ] **Step 1: 테스트 교체**
 
-`tests/test_meeting_session.py`:
+`tests/test_meeting_session.py` 전체를 다음으로 교체:
 ```python
 # tests/test_meeting_session.py
+import numpy as np
+
 from live_translate import MeetingSession
 
 
@@ -148,103 +162,86 @@ def _sess(**kw):
     return MeetingSession(log=lambda *_: None, set_status=lambda *_: None, llm=None, **kw)
 
 
-def test_use_remote_flag_stored():
-    assert _sess(use_remote=True).use_remote is True
-    assert _sess().use_remote is False
-
-
-def test_feed_remote_calls_recorder_feed_audio():
-    sess = _sess(use_remote=True)
+def test_feed_block_converts_float32_to_int16_bytes():
+    sess = _sess()
     calls = []
 
     class FakeRec:
         def feed_audio(self, chunk, sr): calls.append((chunk, sr))
 
     sess.recorder = FakeRec()
-    sess.feed_remote(b"\x01\x02\x03\x04")
-    assert calls == [(b"\x01\x02\x03\x04", 16000)]
+    sess.feed_block(np.array([0.5, -0.5, 0.0, 1.0], dtype=np.float32))
+    assert len(calls) == 1
+    chunk, sr = calls[0]
+    assert sr == 16000
+    arr = np.frombuffer(chunk, dtype="<i2")
+    assert arr[0] == 16383      # 0.5 * 32767 → 16383 (절삭)
+    assert arr[1] == -16383
+    assert arr[2] == 0
+    assert arr[3] == 32767      # 1.0 클립
 
 
-def test_feed_remote_noop_without_recorder():
-    sess = _sess(use_remote=True)
+def test_feed_block_noop_without_recorder():
+    sess = _sess()
     sess.recorder = None
-    sess.feed_remote(b"\x01\x02")   # 예외 없이 무시
+    sess.feed_block(np.zeros(4, dtype=np.float32))   # 예외 없이 무시
+
+
+def test_no_use_remote_param():
+    # use_remote 파라미터는 제거됨 — 주면 TypeError
+    import pytest
+    with pytest.raises(TypeError):
+        _sess(use_remote=True)
 ```
 
 - [ ] **Step 2: 실패 확인**
 
 Run: `.venv/bin/python -m pytest tests/test_meeting_session.py -v`
-Expected: FAIL — `TypeError: __init__() got an unexpected keyword argument 'use_remote'`
+Expected: FAIL — `feed_block` 없음 / 아직 `use_remote` 받음.
 
 - [ ] **Step 3: 구현 (live_translate.py)**
 
-(a) `MeetingSession.__init__` 시그니처에 `use_remote` 추가. 현재:
+(a) 상단 import 에 numpy 추가(없으면). 현재 import 부에 `import numpy as np` 추가. `import pyaudio` 는 제거.
+
+(b) `__init__` 에서 `use_remote` 제거. 현재:
+```python
+    def __init__(self, *, log, set_status, llm,
+                 meta: MeetingMeta | None = None,
+                 model: str = "small", realtime_model: str = "tiny",
+                 language: str = "",
+                 use_remote: bool = False):
+```
+교체:
 ```python
     def __init__(self, *, log, set_status, llm,
                  meta: MeetingMeta | None = None,
                  model: str = "small", realtime_model: str = "tiny",
                  language: str = ""):
 ```
-교체:
-```python
-    def __init__(self, *, log, set_status, llm,
-                 meta: MeetingMeta | None = None,
-                 model: str = "small", realtime_model: str = "tiny",
-                 language: str = "", use_remote: bool = False):
-```
-그리고 `self.language = language` 다음 줄에 추가:
-```python
-        self.use_remote = use_remote
-```
+그리고 본문의 `self.use_remote = use_remote` 줄을 **삭제**.
 
-(b) `start()` 의 recorder 생성부를 분기. 현재:
+(c) `feed_remote` 메서드를 `feed_block` 으로 교체. 현재:
 ```python
-        mic_idx = _pick_physical_mic()
-
-        # 회의 전용 워드북(wordbook_meet.txt)을 양쪽 모델에 컨디셔닝으로 주입.
-        # 평상시 자비스 워드북과 분리해 회의에서만 쓰는 고유명사 모음.
-        wb_prompt = wordbook.load_initial_prompt(path=wordbook.MEET_PATH)
-
-        self.recorder = AudioToTextRecorder(
-            model=self.model,
-            realtime_model_type=self.realtime_model,
-            enable_realtime_transcription=True,
-            on_realtime_transcription_update=self._on_partial,
-            language=self.language,
-            initial_prompt=wb_prompt,
-            initial_prompt_realtime=wb_prompt,
-            spinner=False,
-            post_speech_silence_duration=0.7,
-            silero_sensitivity=0.4,
-            webrtc_sensitivity=3,
-            device="cpu",
-            compute_type="int8",
-            input_device_index=mic_idx,
-            level=30,   # WARNING 만
-        )
+    def feed_remote(self, pcm_bytes) -> None:
+        """원격(폰) raw 16kHz Int16 PCM 을 RealtimeSTT 로 주입.
+        use_remote 회의에서 MicRouter tap 이 매 프레임 호출한다."""
+        if self.recorder is not None:
+            self.recorder.feed_audio(pcm_bytes, 16000)
 ```
 교체:
 ```python
-        # 회의 전용 워드북(wordbook_meet.txt)을 양쪽 모델에 컨디셔닝으로 주입.
-        # 평상시 자비스 워드북과 분리해 회의에서만 쓰는 고유명사 모음.
-        wb_prompt = wordbook.load_initial_prompt(path=wordbook.MEET_PATH)
+    def feed_block(self, block) -> None:
+        """MicRouter tap 이 매 블록 호출 — float32 [-1,1] 16kHz 블록을
+        int16 PCM bytes 로 변환해 RealtimeSTT 에 주입.
+        (numpy float32 를 그대로 feed_audio 에 주면 astype(int16) 로 0 이 됨)"""
+        if self.recorder is None:
+            return
+        pcm16 = (np.clip(block, -1.0, 1.0) * 32767).astype(np.int16).tobytes()
+        self.recorder.feed_audio(pcm16, 16000)
+```
 
-        rec_kwargs = dict(
-            model=self.model,
-            realtime_model_type=self.realtime_model,
-            enable_realtime_transcription=True,
-            on_realtime_transcription_update=self._on_partial,
-            language=self.language,
-            initial_prompt=wb_prompt,
-            initial_prompt_realtime=wb_prompt,
-            spinner=False,
-            post_speech_silence_duration=0.7,
-            silero_sensitivity=0.4,
-            webrtc_sensitivity=3,
-            device="cpu",
-            compute_type="int8",
-            level=30,   # WARNING 만
-        )
+(d) `start()` 의 recorder 분기를 제거하고 항상 `use_microphone=False`. 현재:
+```python
         if self.use_remote:
             # 폰(원격) 오디오를 feed_remote()→feed_audio 로 주입 — 마이크 미점유
             rec_kwargs["use_microphone"] = False
@@ -253,39 +250,46 @@ Expected: FAIL — `TypeError: __init__() got an unexpected keyword argument 'us
 
         self.recorder = AudioToTextRecorder(**rec_kwargs)
 ```
-
-(c) `feed_remote` 메서드 추가 (예: `start` 위/아래, 클래스 메서드로):
+교체:
 ```python
-    def feed_remote(self, pcm_bytes) -> None:
-        """원격(폰) raw 16kHz Int16 PCM 을 RealtimeSTT 로 주입.
-        use_remote 회의에서 MicRouter tap 이 매 프레임 호출한다."""
-        if self.recorder is not None:
-            self.recorder.feed_audio(pcm_bytes, 16000)
+        # RealtimeSTT 는 장치를 직접 잡지 않는다 — jarvis 가 feed_block 으로 먹인다.
+        rec_kwargs["use_microphone"] = False
+
+        self.recorder = AudioToTextRecorder(**rec_kwargs)
 ```
+
+(e) `_pick_physical_mic` 함수 정의를 **삭제**(이제 호출처 없음). 함수 전체:
+```python
+def _pick_physical_mic() -> int | None:
+    ...
+```
+를 제거한다. (제거 후 `grep -n "_pick_physical_mic\|pyaudio" live_translate.py` 가 빈 결과여야 함.)
 
 - [ ] **Step 4: 통과 확인**
 
-Run: `.venv/bin/python -m pytest tests/test_meeting_session.py -v`
-Expected: PASS (3). 그리고 `.venv/bin/python -c "import live_translate; print('ok')"` → ok.
+Run: `.venv/bin/python -m pytest tests/test_meeting_session.py -v` (3 pass).
+Run: `.venv/bin/python -c "import live_translate; print('ok')"` (ok).
+Run: `grep -n "_pick_physical_mic\|pyaudio" live_translate.py` → 빈 결과.
+Run: `.venv/bin/python -m pytest tests/ -q` → 0 failed.
 
 - [ ] **Step 5: 커밋**
 
 ```bash
 git add live_translate.py tests/test_meeting_session.py
-git commit -m "feat: MeetingSession.use_remote — 폰 오디오를 feed_audio 로 주입"
+git commit -m "refactor: MeetingSession 항상 use_microphone=False + feed_block(float32→int16)"
 ```
 
 ---
 
-## Task 3: /meet phone|system 인자
+## Task 3: /meet — 소스 인자 제거
 
 **Files:**
 - Modify: `commands.py` (`_meet`)
-- Test: `tests/test_meet_command.py` (신규)
+- Test: `tests/test_meet_command.py` (교체)
 
-- [ ] **Step 1: 실패 테스트 작성**
+- [ ] **Step 1: 테스트 교체**
 
-`tests/test_meet_command.py`:
+`tests/test_meet_command.py` 전체를 다음으로 교체:
 ```python
 # tests/test_meet_command.py
 import asyncio
@@ -297,40 +301,28 @@ def _run(text, ctx):
     asyncio.run(commands.dispatch(text, ctx))
 
 
-def test_meet_phone_passes_use_remote_true():
-    got = {}
-    async def starter(use_remote): got["v"] = use_remote
-    _run("/meet phone", {"log": lambda *_: None, "start_meeting": starter})
-    assert got["v"] is True
-
-
-def test_meet_system_and_noarg_false():
-    got = []
-    async def starter(use_remote): got.append(use_remote)
-    _run("/meet system", {"log": lambda *_: None, "start_meeting": starter})
+def test_meet_calls_starter_no_arg():
+    called = []
+    async def starter(): called.append(True)
     _run("/meet", {"log": lambda *_: None, "start_meeting": starter})
-    assert got == [False, False]
+    assert called == [True]
+
+
+def test_meet_ignores_extra_args():
+    called = []
+    async def starter(): called.append(True)
+    _run("/meet phone", {"log": lambda *_: None, "start_meeting": starter})
+    assert called == [True]
 ```
 
 - [ ] **Step 2: 실패 확인**
 
 Run: `.venv/bin/python -m pytest tests/test_meet_command.py -v`
-Expected: FAIL — 현재 `_meet` 가 `starter()` 를 인자 없이 호출(`TypeError`) 또는 use_remote 미전달.
+Expected: FAIL — 현재 `_meet` 가 `starter(use_remote)` 로 호출(인자 1개) → `starter()` 시그니처와 불일치(TypeError).
 
 - [ ] **Step 3: 구현 — `commands.py` 의 `_meet` 교체**
 
 현재:
-```python
-@command("meet", help="회의 모드 — 메타 입력 후 실시간 자막 + 양방향 번역")
-async def _meet(args: str, ctx: dict):
-    starter = ctx.get("start_meeting")
-    if starter is None:
-        ctx["log"]("이 환경에서는 회의 모드를 사용할 수 없습니다.")
-        return
-    await starter()
-    ctx["handled_state"] = True   # 메타 입력 대기 상태로, idle 막기
-```
-교체:
 ```python
 @command("meet", help="회의 모드 — 실시간 자막 + 양방향 번역", usage="[phone|system]")
 async def _meet(args: str, ctx: dict):
@@ -342,54 +334,41 @@ async def _meet(args: str, ctx: dict):
     await starter(use_remote)
     ctx["handled_state"] = True   # 회의 진입 상태로, idle 막기
 ```
+교체:
+```python
+@command("meet", help="회의 모드 — 실시간 자막 + 양방향 번역")
+async def _meet(args: str, ctx: dict):
+    starter = ctx.get("start_meeting")
+    if starter is None:
+        ctx["log"]("이 환경에서는 회의 모드를 사용할 수 없습니다.")
+        return
+    await starter()
+    ctx["handled_state"] = True   # 회의 진입 상태로, idle 막기
+```
 
 - [ ] **Step 4: 통과 확인**
 
-Run: `.venv/bin/python -m pytest tests/test_meet_command.py -v`
-Expected: PASS (2). 그리고 `.venv/bin/python -m pytest tests/ -q` → 0 failed.
+Run: `.venv/bin/python -m pytest tests/test_meet_command.py -v` (2 pass). 그리고 `.venv/bin/python -m pytest tests/ -q` → 0 failed.
 
 - [ ] **Step 5: 커밋**
 
 ```bash
 git add commands.py tests/test_meet_command.py
-git commit -m "feat: /meet phone|system — 회의 소스 선택"
+git commit -m "refactor: /meet 소스 인자 제거 — 회의가 현재 마이크 소스 추종"
 ```
 
 ---
 
-## Task 4: main.py 배선 — use_remote 전달 + tap 설정/해제 + 경고
+## Task 4: main.py — 동적 배선 (pause 제거 + tap=feed_block)
 
 **Files:**
 - Modify: `main.py`
 
-통합 배선 — import/parse 스모크 + 전체 suite 로 검증.
+통합 배선 — import/parse 스모크 + 전체 suite.
 
-- [ ] **Step 1: start_meeting_setup 가 use_remote 를 받아 전달**
+- [ ] **Step 1: start_meeting_setup 무인자로**
 
-`main.py` `start_meeting_setup` 의 시그니처와 `_begin_meeting` 호출을 수정. 현재:
-```python
-    async def start_meeting_setup():
-        """/meet 진입 → 메타 입력 단계 시작. 첫 질문 출력."""
-        nonlocal response
-        if meeting_session["obj"] is not None:
-            console.log("회의 모드가 이미 진행 중입니다.")
-            return
-        if meeting_setup["obj"] is not None:
-            return
-        await cancel(response); response = None
-        player.flush()
-        _drain_text_queue()
-        from live_translate import MeetingSetup
-        setup = MeetingSetup(default_my_name=config.USER_NAME)
-        if setup.done:
-            # 입력 단계 없음(상대방 이름 안 받음) → 곧장 회의 시작
-            await _begin_meeting(setup.meta)
-            return
-        meeting_setup["obj"] = setup
-        console.log(f"🎤 회의 시작 전 정보를 입력해주세요. (내 이름: {config.USER_NAME}, Esc 로 취소)")
-        console.log(f"   {setup.prompt}")
-```
-교체 (시그니처에 `use_remote=False`, `_begin_meeting` 에 전달):
+현재:
 ```python
     async def start_meeting_setup(use_remote=False):
         """/meet 진입 → (입력 단계 없으면) 곧장 회의 시작."""
@@ -405,36 +384,34 @@ git commit -m "feat: /meet phone|system — 회의 소스 선택"
         from live_translate import MeetingSetup
         setup = MeetingSetup(default_my_name=config.USER_NAME)
         if setup.done:
+            # 입력 단계 없음(상대방 이름 안 받음) → 곧장 회의 시작
             await _begin_meeting(setup.meta, use_remote)
             return
-        meeting_setup["obj"] = setup
-        console.log(f"🎤 회의 시작 전 정보를 입력해주세요. (내 이름: {config.USER_NAME}, Esc 로 취소)")
-        console.log(f"   {setup.prompt}")
 ```
-
-- [ ] **Step 2: _begin_meeting 이 use_remote 처리 + tap 설정 + 경고**
-
-`_begin_meeting` 의 시그니처와 본문 앞부분을 수정. 현재 시작:
+교체(시그니처 무인자, `_begin_meeting(setup.meta)`):
 ```python
-    async def _begin_meeting(meta) -> None:
-        """메타가 모인 다음 호출. 본체 마이크 양보 + RealtimeSTT 시작.
-        RELAY_URL/RELAY_TOKEN 이 설정돼 있으면 outbound ws 로 자막 중계도 활성."""
-        from live_translate import MeetingSession
-        mic.pause()
-        try:
-            sess = MeetingSession(
-                log=console.log,
-                set_status=console.set_status,
-                llm=llm,
-                meta=meta,
-                model=config.MEET_STT_MODEL,
-                realtime_model=config.MEET_STT_REALTIME_MODEL,
-            )
-            await sess.start()
-            meeting_session["obj"] = sess
-            console.log(f"🎤 회의를 시작합니다. 회의 번호: {meta.key}")
+    async def start_meeting_setup():
+        """/meet 진입 → (입력 단계 없으면) 곧장 회의 시작."""
+        nonlocal response
+        if meeting_session["obj"] is not None:
+            console.log("회의 모드가 이미 진행 중입니다.")
+            return
+        if meeting_setup["obj"] is not None:
+            return
+        await cancel(response); response = None
+        player.flush()
+        _drain_text_queue()
+        from live_translate import MeetingSetup
+        setup = MeetingSetup(default_my_name=config.USER_NAME)
+        if setup.done:
+            # 입력 단계 없음(상대방 이름 안 받음) → 곧장 회의 시작
+            await _begin_meeting(setup.meta)
+            return
 ```
-교체:
+
+- [ ] **Step 2: _begin_meeting 동적화 (pause/gating/경고 제거, tap=feed_block)**
+
+현재 시작부(시그니처 ~ `console.log(f"🎤 회의를 시작합니다 ...")` 까지):
 ```python
     async def _begin_meeting(meta, use_remote=False) -> None:
         """메타가 모인 다음 호출. 본체 마이크 양보 + RealtimeSTT 시작.
@@ -464,21 +441,49 @@ git commit -m "feat: /meet phone|system — 회의 소스 선택"
                     console.log("⚠ 폰이 연결돼 있지 않습니다 — 폰에서 마이크를 켜세요.")
             console.log(f"🎤 회의를 시작합니다 (소스: {'폰' if use_remote else '시스템'}). 회의 번호: {meta.key}")
 ```
-(아래 relay 중계 블록은 그대로 둔다.)
-
-- [ ] **Step 3: stop_meeting 에서 tap 해제**
-
-`stop_meeting` 의 정리부를 수정. 현재:
-```python
-        try:
-            await sess.stop()
-        finally:
-            meeting_session["obj"] = None
-            mic.resume()
-            console.set_status(None)
-            idle()
-```
 교체:
+```python
+    async def _begin_meeting(meta) -> None:
+        """메타가 모인 다음 호출. RealtimeSTT 시작 + MicRouter tap 으로 현재 활성
+        소스(시스템/폰)를 동적으로 먹인다. mic.pause() 안 함 — 로컬 캡처를 유지해야
+        시스템 마이크를 feed 할 수 있고, tap 이 블록을 큐에서 가로채 wake/VAD 는 idle.
+        RELAY_URL/RELAY_TOKEN 이 설정돼 있으면 outbound ws 로 자막 중계도 활성."""
+        from live_translate import MeetingSession
+        try:
+            sess = MeetingSession(
+                log=console.log,
+                set_status=console.set_status,
+                llm=llm,
+                meta=meta,
+                model=config.MEET_STT_MODEL,
+                realtime_model=config.MEET_STT_REALTIME_MODEL,
+            )
+            await sess.start()
+            meeting_session["obj"] = sess
+            # 활성 소스 블록을 메인 VAD 대신 RealtimeSTT 로 우회 (소스 전환은 동적)
+            mic.router.set_tap(sess.feed_block)
+            console.log(f"🎤 회의를 시작합니다. 회의 번호: {meta.key}")
+```
+(이후 relay 중계 블록은 그대로. 단 아래 except 도 수정 — 다음 스텝.)
+
+- [ ] **Step 3: _begin_meeting 의 except 에서 mic.resume 제거 + tap 정리**
+
+현재 `_begin_meeting` 끝의 except:
+```python
+        except Exception as ex:
+            mic.resume()
+            console.log(f"회의 모드 시작 실패: {ex}")
+```
+교체(시작 실패 시 tap 은 아직 미설정이지만 방어적으로 해제, resume 제거):
+```python
+        except Exception as ex:
+            mic.router.set_tap(None)
+            console.log(f"회의 모드 시작 실패: {ex}")
+```
+
+- [ ] **Step 4: stop_meeting 에서 resume 제거 (tap 해제는 유지)**
+
+현재:
 ```python
         try:
             await sess.stop()
@@ -489,55 +494,62 @@ git commit -m "feat: /meet phone|system — 회의 소스 선택"
             console.set_status(None)
             idle()
 ```
+교체(회의 중 pause 안 했으므로 resume 불필요):
+```python
+        try:
+            await sess.stop()
+        finally:
+            mic.router.set_tap(None)   # 블록을 메인 큐(wake/VAD)로 복귀
+            meeting_session["obj"] = None
+            console.set_status(None)
+            idle()
+```
 
-- [ ] **Step 4: 검증**
+- [ ] **Step 5: 검증**
 
-Run: `.venv/bin/python -c "import ast; ast.parse(open('main.py').read()); import main; print('ok')"`
-Expected: `ok`
-Run: `.venv/bin/python -m pytest tests/ -q`
-Expected: 0 failed
+Run: `.venv/bin/python -c "import ast; ast.parse(open('main.py').read()); import main; print('ok')"` → `ok`
+Run: `.venv/bin/python -m pytest tests/ -q` → 0 failed
+Run: `grep -n "use_remote\|feed_remote\|mic.pause\|mic.resume" main.py` → 빈 결과(회의 관련 잔여 없음; 다른 모드의 pause/resume 가 없다면 전부 빔)
 
-- [ ] **Step 5: 커밋**
+- [ ] **Step 6: 커밋**
 
 ```bash
 git add main.py
-git commit -m "feat: main — /meet 소스 전달, 폰 모드 tap 설정/해제 + 경고"
+git commit -m "refactor: main 회의 동적 배선 — pause 제거, tap=feed_block, 인자 제거"
 ```
 
 ---
 
-## Task 5: 수동 E2E 확인 (비코드)
+## Task 5: 수동 E2E
 
-- [ ] **Step 1: 폰 모드 회의**
+- [ ] **Step 1: 시스템 소스 회의**
 
-1. jarvis 재시작 (`.env`: REMOTE_MIC_ENABLED=true, RELAY_URL/TOKEN, USER_NAME=Concode).
-2. 폰 `…/m/Concode` → admin → 마이크 켜기 (게이지 확인).
-3. jarvis 콘솔에서 `/meet phone` → "소스: 폰" 표시.
-4. 폰에 대고 말 → 자막/번역 생성 확인.
-5. `/stop` → 회의 종료. 이후 평상시 폰 마이크(원격) 정상 동작 확인(`/meet` 안 한 상태에서 "Hey Jarvis").
+1. jarvis 재시작. 폰 마이크 끈 상태에서 `/meet` → 회의 시작.
+2. PC(시스템) 마이크로 말 → 자막 생성 확인. (active=local 블록이 feed)
 
-- [ ] **Step 2: 시스템 모드 회의**
+- [ ] **Step 2: 회의 중 폰으로 동적 전환**
 
-1. `/meet system`(또는 `/meet`) → "소스: 시스템".
-2. PC 마이크로 자막 생성 확인.
+1. 회의 중 폰 `…/m/Concode` 마이크 켜기(또는 콘솔 `/mic phone`).
+2. jarvis 콘솔 `🎙️ 입력 소스 → 원격(폰)` 후, 자막 소스가 폰으로 **끊김 없이** 전환되는지 확인.
+3. `/mic system`(또는 폰 끄기) → 시스템으로 복귀, 자막 계속.
 
-- [ ] **Step 3: 폰 미연결 경고**
+- [ ] **Step 3: 종료 복귀**
 
-1. 폰 마이크 끈 상태에서 `/meet phone` → "⚠ 폰이 연결돼 있지 않습니다" 경고 확인. 이후 폰을 켜면 자막이 흐르기 시작하는지 확인.
+1. `/stop` → 회의 종료. 평상시 "Hey Jarvis"(원격/시스템) 정상 동작 확인.
 
 ---
 
 ## Self-Review 결과
 
 **Spec coverage:**
-- `/meet phone|system`/무인자=system → Task 3 ✓
-- MicRouter tap 우회 → Task 1 ✓
-- MeetingSession use_remote + feed_remote + recorder 분기 → Task 2 ✓
-- main 배선(tap 설정/해제, REMOTE_MIC_ENABLED 폴백, 미연결 경고) → Task 4 ✓
-- 회의 종료 시 set_tap(None) → Task 4 Step 3 ✓
-- 테스트(단위 MicRouter/MeetingSession/명령 + 수동 E2E) → Task 1·2·3 단위, Task 5 수동 ✓
-- 연기(동적 전환, 폰 자막/TTS 송출) → 미구현(스펙대로) ✓
+- tap 블록 레벨 + on_remote_frame 원복 → Task 1 ✓
+- 항상 use_microphone=False + feed_block(float32→int16) + _pick_physical_mic/pyaudio 제거 → Task 2 ✓
+- /meet 인자 제거 → Task 3 ✓
+- main: pause/gating/경고 제거, set_tap(feed_block), stop 시 set_tap(None) → Task 4 ✓
+- 동적 전환(회의 중 /mic·auto), 폰 없으면 시스템 자동 → Task 1+4 (tap 이 활성 소스 따름) ✓
+- 테스트(단위 3 + 수동) → Task 1·2·3 단위, Task 5 수동 ✓
+- 연기(폰 자막/TTS 송출) → 미구현 ✓
 
-**Type consistency:** `MicRouter.set_tap(fn)`/`active`, `on_remote_frame` 우회, `MeetingSession(use_remote=...)`/`feed_remote(pcm_bytes)`(→`feed_audio(bytes,16000)`), `start_meeting(use_remote)`/`_begin_meeting(meta, use_remote)` — Task 간 일치.
+**Type consistency:** `MicRouter._sink_*` tap, `set_tap`/`active` 유지 · `MeetingSession.feed_block(block)`(float32→int16 bytes→`feed_audio(bytes,16000)`) · `/meet`→`start_meeting()` 무인자 · `_begin_meeting(meta)` 무 use_remote · `mic.router.set_tap(sess.feed_block)` 일치.
 
-**엣지/한계:** tap 은 suppress 보다 우선(회의 중 pause 상태여도 폰 프레임이 feed_remote 로 감). 회의 중 폰 끊김은 recorder 무음 대기(동적 전환 없음). `feed_audio` 는 raw int16 16kHz 그대로 — RealtimeSTT 1.0.2 가 내부 리샘플(original_sample_rate=16000).
+**핵심 불변식:** 회의 중 `mic.pause()` 안 함 → LocalMicSource 캡처 유지 → active=local 시 시스템 마이크가 feed. tap 이 블록을 큐에서 가로채 wake/VAD idle. 종료 시 set_tap(None) 로 복귀. feed_block 은 float32 를 ×32767 후 int16(직접 astype 금지 — 무음).
