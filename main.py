@@ -95,7 +95,7 @@ async def main():
         from control_receiver import ControlReceiver
 
         async def _on_remote_command(kind):
-            nonlocal hands_free, response, watchdog
+            nonlocal hands_free, response, watchdog, stop_after_response
             if kind == "meeting_stop":
                 await stop_meeting()
             elif kind == "meeting_start":
@@ -109,11 +109,13 @@ async def main():
                 await trigger_wake()   # 호출어 없이 즉시 청취
             elif kind == "listen_stop":
                 hands_free = False
-                await cancel(response); response = None
-                if watchdog is not None and not watchdog.done():
-                    watchdog.cancel()
-                watchdog = None
-                idle()
+                if response is not None and not response.done():
+                    stop_after_response = True   # TTS 응답 진행 중 — 끊지 말고 끝나면 idle
+                else:
+                    if watchdog is not None and not watchdog.done():
+                        watchdog.cancel()
+                    watchdog = None
+                    idle()
 
         control_rx = ControlReceiver(
             config.RELAY_URL, config.RELAY_TOKEN,
@@ -125,6 +127,7 @@ async def main():
     response: asyncio.Task | None = None   # 진행 중 응답 흐름 (텍스트 또는 음성)
     watchdog: asyncio.Task | None = None   # LISTENING 타임아웃
     hands_free = False                     # 웹 음성버튼 핸즈프리 — 타임아웃 무효 + 계속 청취
+    stop_after_response = False            # 핸즈프리 OFF 요청 — 진행 응답은 끝까지 두고, 끝나면 idle
     text_queue: asyncio.Queue[str] = asyncio.Queue()   # 텍스트 입력 대기열
     exit_event = asyncio.Event()           # /bye 등 명시적 종료 요청
 
@@ -235,6 +238,7 @@ async def main():
         - 평상시: ok.wav → STT → LLM 응답 → TTS → 다시 듣기 (직렬)
         - 번역 모드: 효과음 X + STT/번역까지 통째로 백그라운드, 즉시 다시 듣기.
           → 연속 발화 중간에 마이크가 안 끊기고 효과음 되먹임도 없다."""
+        nonlocal stop_after_response
         if MODE.is_translate():
             # 효과음 X (말 위에 노이즈 안 끼게), STT+번역 통째로 백그라운드 위탁
             asyncio.create_task(_translate_bg(audio))
@@ -258,7 +262,10 @@ async def main():
         # 웹 TTS 는 폰에서 재생되어 player.is_speaking()=False — web_speaking_until 까지 대기
         while player.is_speaking() or time.monotonic() < web_speaking_until:
             await asyncio.sleep(0.1)
-        if hands_free or config.FOLLOW_UP:
+        if stop_after_response:
+            stop_after_response = False
+            idle()   # 핸즈프리 OFF 요청됨 — 응답 끝났으니 대기로
+        elif hands_free or config.FOLLOW_UP:
             await enter_listening(cue=True)
         else:
             idle()
@@ -562,6 +569,7 @@ async def main():
             web_pub.emit("partial", text)
 
     async def _respond_voice(text):
+        nonlocal stop_after_response
         if text:
             intent = mode_intent(text)
             if intent:
@@ -573,19 +581,23 @@ async def main():
         # 웹 TTS 는 폰에서 재생되어 player.is_speaking()=False — web_speaking_until 까지 대기
         while player.is_speaking() or time.monotonic() < web_speaking_until:
             await asyncio.sleep(0.1)
-        if hands_free or config.FOLLOW_UP:
+        if stop_after_response:
+            stop_after_response = False
+            idle()   # 핸즈프리 OFF 요청됨 — 응답 끝났으니 대기로
+        elif hands_free or config.FOLLOW_UP:
             await enter_listening(cue=True)
         else:
             idle()
 
     def _on_stt_final(text):
-        nonlocal state, response, watchdog
+        nonlocal state, response, watchdog, stop_after_response
         if state != "LISTENING":
             return   # 응답/대기 중 들어온 stray final 무시
         if watchdog is not None and not watchdog.done():
             watchdog.cancel()
         watchdog = None
         mic.router.set_tap(None)   # 응답 중 인식 중단(자기 TTS 에코 방지)
+        stop_after_response = False   # 새 턴 시작 — 이전 stop 플래그 정리
         state = "RESPONDING"
         response = asyncio.create_task(_respond_voice((text or "").strip()))
 
