@@ -119,6 +119,9 @@
           $("mic-src").textContent = ev.source === "remote" ? "🎚️ 원격(폰)" : "🎚️ 시스템";
           $("mic-src").classList.toggle("remote", ev.source === "remote");
         }
+        else if (ev.kind === "navigate" && ev.text === "meeting") {
+          location.href = "/" + encodeURIComponent(name) + "/meeting";
+        }
       } catch {}
     });
     ws.addEventListener("close", (e) => {

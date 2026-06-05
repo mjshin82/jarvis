@@ -16,7 +16,8 @@ export type EventKind =
   | "no_receiver"
   | "mic_source"           // jarvis 가 듣는 소스 상태 (system|remote)
   | "user"
-  | "assistant";
+  | "assistant"
+  | "navigate";
 
 export interface MeetingMeta {
   key: string;

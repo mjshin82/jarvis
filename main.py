@@ -28,6 +28,7 @@ import config
 import console
 import commands
 import coach
+from intent import mode_intent
 from audio_io import Microphone
 from audio_backend import make_backend
 from stt import STT
@@ -178,6 +179,22 @@ async def main():
         if ko:
             console.log(f"🌐 {ko}")
 
+    async def _handle_mode(intent: str, text: str) -> None:
+        """음성/텍스트 모드 전환 처리 + 웹 navigate 발행."""
+        console.log(f"🧑 {text}")
+        if web_pub is not None:
+            web_pub.emit("user", text)
+        if intent == "meeting":
+            if web_pub is not None:
+                web_pub.emit("assistant", "🎤 회의 모드로 전환합니다")
+            await start_meeting_setup()
+            if web_pub is not None:
+                web_pub.emit("navigate", "meeting")
+        else:  # "stop"
+            await stop_meeting()
+            if web_pub is not None:
+                web_pub.emit("navigate", "home")
+
     async def respond_flow_audio(audio):
         """음성 입력 흐름.
         - 평상시: ok.wav → STT → LLM 응답 → TTS → 다시 듣기 (직렬)
@@ -196,6 +213,10 @@ async def main():
         finally:
             console.set_status(None)
         if text:
+            intent = mode_intent(text)
+            if intent:
+                await _handle_mode(intent, text)
+                return   # 모드 전환이 자체적으로 상태(회의/idle) 를 관리
             await speak_response(text)
         else:
             console.log("🧑 (인식된 음성 없음)")
@@ -216,7 +237,12 @@ async def main():
         if commands.is_command(text):
             await commands.dispatch(text, cmd_ctx)
         else:
-            await speak_response(text)
+            intent = mode_intent(text)
+            if intent:
+                await _handle_mode(intent, text)
+                cmd_ctx["handled_state"] = True   # 모드가 상태를 책임 → idle 생략
+            else:
+                await speak_response(text)
         while player.is_speaking():
             await asyncio.sleep(0.1)
         if not cmd_ctx.get("handled_state"):
