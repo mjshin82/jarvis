@@ -31,8 +31,6 @@
   }
   header .title { font-size: 18px; font-weight: 600; }
   #meta-badge { font-size: 12px; color: var(--muted); }
-  #mic-src { padding: 3px 8px; border-radius: 6px; background: #8882; font-size: 13px; }
-  #mic-src.remote { background: #22c55e; color: #03240f; }
   #conn { margin-left: auto; font-size: 13px; opacity: 0.8; }
   #conn.ok { color: var(--ko); opacity: 1; }
   #conn.bad { color: #d33; opacity: 1; }
@@ -101,7 +99,6 @@
   <header>
     <span class="title" id="title">🤖 Jarvis</span>
     <span id="meta-badge"></span>
-    <span id="mic-src"></span>
     <span id="conn">···</span>
   </header>
   <div id="controls">
@@ -308,11 +305,7 @@
         $("conn").classList.remove("ok"); $("conn").classList.add("bad");
         return;
       }
-      case "mic_source": {
-        $("mic-src").textContent = ev.source === "remote" ? "🎚️ 원격(폰)" : "🎚️ 시스템";
-        $("mic-src").classList.toggle("remote", ev.source === "remote");
-        break;
-      }
+      case "mic_source": return;   // 소스 배지 제거 — 무시
       default: return;
     }
     scrollIfLocked();
