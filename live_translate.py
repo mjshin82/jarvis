@@ -101,7 +101,8 @@ class MeetingSession:
     def __init__(self, *, log, set_status, llm,
                  meta: MeetingMeta | None = None,
                  model: str = "small", realtime_model: str = "tiny",
-                 language: str = ""):
+                 language: str = "",
+                 use_remote: bool = False):
         self.log = log
         self.set_status = set_status
         self.llm = llm                       # 자비스 본체 LLM (폴백용)
@@ -109,6 +110,7 @@ class MeetingSession:
         self.model = model
         self.realtime_model = realtime_model
         self.language = language
+        self.use_remote = use_remote
         self.recorder = None
         self._loop = None
         self._final_q: asyncio.Queue[str | None] | None = None
@@ -164,18 +166,22 @@ class MeetingSession:
             self._tx_model = self.llm.model
             self._tx_label = f"local ({self._tx_model})"
 
+    def feed_remote(self, pcm_bytes) -> None:
+        """원격(폰) raw 16kHz Int16 PCM 을 RealtimeSTT 로 주입.
+        use_remote 회의에서 MicRouter tap 이 매 프레임 호출한다."""
+        if self.recorder is not None:
+            self.recorder.feed_audio(pcm_bytes, 16000)
+
     async def start(self) -> None:
         from RealtimeSTT import AudioToTextRecorder   # 회의 모드 진입할 때만 import
 
         self._loop = asyncio.get_running_loop()
         self._final_q = asyncio.Queue()
-        mic_idx = _pick_physical_mic()
-
         # 회의 전용 워드북(wordbook_meet.txt)을 양쪽 모델에 컨디셔닝으로 주입.
         # 평상시 자비스 워드북과 분리해 회의에서만 쓰는 고유명사 모음.
         wb_prompt = wordbook.load_initial_prompt(path=wordbook.MEET_PATH)
 
-        self.recorder = AudioToTextRecorder(
+        rec_kwargs = dict(
             model=self.model,
             realtime_model_type=self.realtime_model,
             enable_realtime_transcription=True,
@@ -189,9 +195,15 @@ class MeetingSession:
             webrtc_sensitivity=3,
             device="cpu",
             compute_type="int8",
-            input_device_index=mic_idx,
             level=30,   # WARNING 만
         )
+        if self.use_remote:
+            # 폰(원격) 오디오를 feed_remote()→feed_audio 로 주입 — 마이크 미점유
+            rec_kwargs["use_microphone"] = False
+        else:
+            rec_kwargs["input_device_index"] = _pick_physical_mic()
+
+        self.recorder = AudioToTextRecorder(**rec_kwargs)
 
         # 번역기 셋업 (시스템 프롬프트 1회 빌드 → 매 호출 동일하게 사용)
         self._setup_translator()
