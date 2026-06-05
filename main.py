@@ -55,14 +55,14 @@ async def main():
         from remote_mic_receiver import RemoteMicReceiver
         remote_mic_rx = RemoteMicReceiver(
             config.RELAY_URL, config.RELAY_TOKEN, mic.router,
-            on_log=console.log, key=config.REMOTE_MIC_KEY,
+            on_log=console.log, key=config.ROOM_KEY,
             connect_timeout=config.RELAY_TIMEOUT_S,
         )
         remote_mic_rx.start()
         mic.router.on_switch = remote_mic_rx.notify_source
         remote_mic_monitor = asyncio.create_task(mic.router.run_idle_monitor())
         cap_base = config.RELAY_URL.replace("wss://", "https://").replace("ws://", "http://")
-        cap_url = f"{cap_base}/m/{config.REMOTE_MIC_KEY}"
+        cap_url = f"{cap_base}/m/{config.ROOM_KEY}"
         box_width = max(len(cap_url) + 4, 60)
         border = "─" * box_width
         console.log("")
@@ -306,6 +306,10 @@ async def main():
         _drain_text_queue()
         from live_translate import MeetingSetup
         setup = MeetingSetup(default_my_name=config.USER_NAME)
+        if setup.done:
+            # 입력 단계 없음(상대방 이름 안 받음) → 곧장 회의 시작
+            await _begin_meeting(setup.meta)
+            return
         meeting_setup["obj"] = setup
         console.log(f"🎤 회의 시작 전 정보를 입력해주세요. (내 이름: {config.USER_NAME}, Esc 로 취소)")
         console.log(f"   {setup.prompt}")

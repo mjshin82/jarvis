@@ -14,7 +14,6 @@
   종료 → RealtimeSTT shutdown
 """
 import asyncio
-import re
 import sys
 from dataclasses import dataclass, field
 
@@ -38,26 +37,18 @@ class MeetingMeta:
 
     @property
     def key(self) -> str:
-        return f"{_safe(self.partner_name)}_{_safe(self.my_name)}"
+        # 방 key 는 이름 기반 공용 ROOM_KEY (jarvis 1개). 자막·원격 마이크가 같은 방.
+        return config.ROOM_KEY
 
 
-def _safe(name: str, max_len: int = 30) -> str:
-    """회의 키용 정규화: 공백→_, 영숫자/한글만, 길이 제한."""
-    s = re.sub(r"\s+", "_", name.strip())
-    s = re.sub(r"[^0-9A-Za-z가-힣_\-]", "", s)
-    return (s or "unknown")[:max_len]
-
-
-# 메타 입력 단계 — 사용자에게 *반드시* 물어야 할 것만 남긴다.
+# 메타 입력 단계 — 현재는 없음(상대방 이름을 묻지 않는다).
 # my_name 은 config.USER_NAME 에서 기본값, partner/my 의 언어는 LLM 이 자동 분기.
-_META_STEPS = (
-    ("partner_name", "상대방 이름을 입력해주세요."),
-)
+_META_STEPS = ()
 
 
 class MeetingSetup:
-    """메타 입력 진행 상태. /meet 입력 직후 텍스트 큐가 이 객체로 라우팅됨.
-    my_name 은 config.USER_NAME 으로 자동 채움 — 사용자 입력 단계는 1단계뿐."""
+    """메타 입력 진행 상태. 현재 입력 단계가 없어 생성 즉시 done — /meet 가 바로 시작.
+    my_name 은 config.USER_NAME 으로 자동 채움."""
 
     def __init__(self, default_my_name: str = "Concode"):
         self.meta = MeetingMeta(my_name=default_my_name)
