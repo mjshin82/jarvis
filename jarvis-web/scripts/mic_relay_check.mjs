@@ -1,6 +1,6 @@
-// meeting-web/scripts/mic_relay_check.mjs
-// 사용법: 터미널 1) cd meeting-web && npm run dev   (.dev.vars 에 RELAY_TOKEN, ADMIN_PASSWORD)
-//         터미널 2) cd meeting-web && RELAY_TOKEN=devtoken ADMIN_PASSWORD=adminpw node scripts/mic_relay_check.mjs
+// jarvis-web/scripts/mic_relay_check.mjs
+// 사용법: 터미널 1) cd jarvis-web && npm run dev   (.dev.vars 에 RELAY_TOKEN, ADMIN_PASSWORD)
+//         터미널 2) cd jarvis-web && RELAY_TOKEN=devtoken ADMIN_PASSWORD=adminpw node scripts/mic_relay_check.mjs
 import WebSocket from "ws";
 
 const BASE = process.env.BASE || "ws://localhost:8787";
@@ -37,7 +37,7 @@ async function main() {
   console.log("binary 포워딩(admin):", b.isBinary ? "OK" : "FAIL");
 
   // 4) viewer 접속 후, receiver 가 mic_source 송신 → viewer 가 수신
-  const viewer = await open(`${BASE}/subscribe/${KEY}`);
+  const viewer = await open(`${BASE}/subscribe/${KEY}?token=${ADMIN}`);
   const vMsg = (async () => {
     for (;;) {
       const m = await nextMsg(viewer);
@@ -49,7 +49,7 @@ async function main() {
   console.log("mic_source broadcast:", vm.includes('"source":"remote"') || vm.includes('"source": "remote"') ? "OK" : `FAIL (${vm})`);
 
   // 5) 신규 viewer 가 lastMicSource 동기화 수신
-  const viewer2 = await open(`${BASE}/subscribe/${KEY}`);
+  const viewer2 = await open(`${BASE}/subscribe/${KEY}?token=${ADMIN}`);
   const v2 = (async () => {
     for (;;) {
       const m = await nextMsg(viewer2);
@@ -64,6 +64,14 @@ async function main() {
   const send2 = await open(`${BASE}/mic/${KEY}?token=${ADMIN}`);
   const km = await Promise.race([kicked, new Promise((_, r) => setTimeout(() => r(new Error("timeout")), 3000))]).catch((e) => fail(e.message));
   console.log("takeover kicked 통지:", km.text && km.text.includes('"kicked"') ? "OK" : `FAIL (${km.text})`);
+
+  // 7) /subscribe 는 무토큰 거부, ADMIN_PASSWORD 로 통과
+  let subRejected = false;
+  try { await open(`${BASE}/subscribe/${KEY}`); } catch { subRejected = true; }
+  console.log("subscribe 무토큰 거부:", subRejected ? "OK" : "FAIL");
+  const sub = await open(`${BASE}/subscribe/${KEY}?token=${ADMIN}`);
+  console.log("subscribe admin 통과:", "OK");
+  sub.close();
 
   [recv, send, send2, viewer, viewer2].forEach((w) => w.close());
   process.exit(0);
