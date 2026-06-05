@@ -90,6 +90,10 @@ MEET_REMOTE_MODEL = os.getenv("MEET_REMOTE_MODEL", "deepseek-chat")
 RELAY_URL = os.getenv("RELAY_URL", "")            # ws://localhost:8787 또는 wss://...workers.dev
 RELAY_TOKEN = os.getenv("RELAY_TOKEN", "")        # meeting-web 의 RELAY_TOKEN 과 일치해야 함
 RELAY_TIMEOUT_S = float(os.getenv("RELAY_TIMEOUT_S", "5"))
+# 원격 마이크 (웹 프론트가 보내는 외부 마이크 스트림). RELAY_URL/RELAY_TOKEN 재사용.
+REMOTE_MIC_ENABLED = os.getenv("REMOTE_MIC_ENABLED", "false").lower() in ("1", "true", "yes")
+REMOTE_MIC_KEY = os.getenv("REMOTE_MIC_KEY", "jarvis")   # relay 방 key (캡처 페이지와 일치)
+REMOTE_MIC_IDLE_S = float(os.getenv("REMOTE_MIC_IDLE_S", "2.0"))  # 이 시간 무프레임이면 시스템 마이크 복귀
 
 # 사용자(나) 이름 — /meet 메타 입력 시 매번 묻지 않고 .env 에서 가져온다.
 USER_NAME = os.getenv("USER_NAME", "Concode")
