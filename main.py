@@ -148,7 +148,7 @@ async def main():
             await player.enqueue_file(config.FX_WAKE)
         state = "LISTENING"
         if recognizer is not None and not MODE.is_translate():
-            mic.router.set_tap(recognizer.feed_block)   # 블록을 RealtimeSTT 로 연속 피드
+            mic.router.set_tap(_recognizer_feed)   # 블록을 RealtimeSTT 로 (TTS 중엔 드롭)
         if not MODE.is_translate():
             console.log("🔔 듣고 있어요…")
         watchdog = asyncio.create_task(listen_timeout())
@@ -239,7 +239,8 @@ async def main():
             await speak_response(text)
         else:
             console.log("🧑 (인식된 음성 없음)")
-        while player.is_speaking():
+        # 웹 TTS 는 폰에서 재생되어 player.is_speaking()=False — web_speaking_until 까지 대기
+        while player.is_speaking() or time.monotonic() < web_speaking_until:
             await asyncio.sleep(0.1)
         if config.FOLLOW_UP:
             await enter_listening(cue=True)
@@ -530,6 +531,12 @@ async def main():
             response = asyncio.create_task(respond_flow_text(line))
 
     # --- 일반 대화 스트리밍 STT: partial→콘솔/웹, final→응답 ---
+    def _recognizer_feed(block):
+        # TTS 재생 중(로컬/웹)에는 자기 소리가 STT 로 되먹지 않게 블록 폐기(에코 게이트)
+        if player.is_speaking() or time.monotonic() < web_speaking_until:
+            return
+        recognizer.feed_block(block)
+
     def _on_stt_partial(text):
         console.set_status(f"📝 {text[:80]}")
         if web_pub is not None:
@@ -544,7 +551,8 @@ async def main():
             await speak_response(text)
         else:
             console.log("🧑 (인식된 음성 없음)")
-        while player.is_speaking():
+        # 웹 TTS 는 폰에서 재생되어 player.is_speaking()=False — web_speaking_until 까지 대기
+        while player.is_speaking() or time.monotonic() < web_speaking_until:
             await asyncio.sleep(0.1)
         if config.FOLLOW_UP:
             await enter_listening(cue=True)
