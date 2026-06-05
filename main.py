@@ -59,7 +59,13 @@ async def main():
             connect_timeout=config.RELAY_TIMEOUT_S,
         )
         remote_mic_rx.start()
-        mic.router.on_switch = remote_mic_rx.notify_source
+
+        def _on_mic_switch(src):
+            # 콘솔에 소스 전환을 가시화 + 웹으로도 상태 송신
+            console.log(f"🎙️ 입력 소스 → {'원격(폰)' if src == 'remote' else '시스템'}")
+            remote_mic_rx.notify_source(src)
+
+        mic.router.on_switch = _on_mic_switch
         remote_mic_monitor = asyncio.create_task(mic.router.run_idle_monitor())
         cap_base = config.RELAY_URL.replace("wss://", "https://").replace("ws://", "http://")
         cap_url = f"{cap_base}/m/{config.ROOM_KEY}"

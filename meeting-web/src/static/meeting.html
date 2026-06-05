@@ -359,8 +359,16 @@
     micWS.binaryType = "arraybuffer";
     micWS.onopen = () => { micWS.send(JSON.stringify({ kind: "mic_start" })); };
     micWS.onmessage = (e) => {
-      // 다른 기기가 마이크를 인수하면 relay 가 kicked 를 보낸다
-      try { if (JSON.parse(e.data).kind === "kicked") loseMic("다른 기기가 마이크를 가져갔습니다."); } catch {}
+      let m; try { m = JSON.parse(e.data); } catch { return; }
+      if (m.kind === "kicked") {
+        // 다른 기기가 마이크를 인수
+        loseMic("다른 기기가 마이크를 가져갔습니다.");
+      } else if (m.kind === "no_receiver") {
+        // jarvis 가 이 방(key)에 안 붙어있음 — 송신은 되지만 받는 쪽이 없음
+        const badge = document.getElementById("mic-src");
+        badge.textContent = "⚠ 자비스 미연결";
+        badge.classList.remove("remote");
+      }
     };
     micWS.onclose = (e) => {
       if (e.code === 1006 || e.code === 1008) {
