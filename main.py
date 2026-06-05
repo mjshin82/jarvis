@@ -348,7 +348,6 @@ async def main():
             return
         # 완료 → 실제 회의 시작.
         # 현재 _META_STEPS 가 비어 이 경로는 도달하지 않음(시작은 start_meeting_setup 에서).
-        # 향후 메타 입력 단계가 생기면 use_remote 를 여기까지 이어줘야 한다.
         meta = setup.meta
         meeting_setup["obj"] = None
         await _begin_meeting(meta)
