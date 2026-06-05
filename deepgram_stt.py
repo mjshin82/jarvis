@@ -1,16 +1,12 @@
 # deepgram_stt.py
-"""Deepgram 스트리밍 STT (미팅용). raw websockets 로 nova-3 멀티링구얼 사용.
-interim → on_partial, 발화 종료(speech_final) → on_final. RealtimeSTT 대체."""
+"""Deepgram 스트리밍 STT (미팅용) — 공식 deepgram-sdk(v7) AsyncDeepgramClient 사용.
+nova-3 멀티링구얼. interim → on_partial, 발화 종료(speech_final) → on_final. RealtimeSTT 대체."""
 import asyncio
-import json
-from urllib.parse import urlencode
 
 try:
-    import websockets
+    from deepgram import AsyncDeepgramClient
 except Exception:  # pragma: no cover
-    websockets = None  # type: ignore
-
-_BASE = "wss://api.deepgram.com/v1/listen"
+    AsyncDeepgramClient = None  # type: ignore
 
 
 class DeepgramSTT:
@@ -22,24 +18,12 @@ class DeepgramSTT:
         self.on_final = on_final
         self.on_log = on_log
         self.connect_timeout = connect_timeout
+        self._client = None
         self._out_q: asyncio.Queue = asyncio.Queue(maxsize=2000)
         self._stop = asyncio.Event()
         self._connected = asyncio.Event()
         self._task = None
         self._final_parts = []
-
-    def _url(self):
-        params = {
-            "model": "nova-3",
-            "language": self.language,
-            "encoding": "linear16",
-            "sample_rate": "16000",
-            "channels": "1",
-            "interim_results": "true",
-            "punctuate": "true",
-            "endpointing": "300",
-        }
-        return f"{_BASE}?{urlencode(params)}"
 
     def feed_pcm(self, pcm16: bytes) -> None:
         try:
@@ -48,7 +32,7 @@ class DeepgramSTT:
             pass
 
     def _handle_dg_message(self, msg) -> None:
-        """Deepgram Results 메시지 → on_partial / on_final. (테스트 분리)"""
+        """Deepgram Results 메시지(dict) → on_partial / on_final. (테스트 분리)"""
         if not isinstance(msg, dict) or msg.get("type") != "Results":
             return
         try:
@@ -71,8 +55,9 @@ class DeepgramSTT:
             self.on_partial((prefix + " " + text).strip())
 
     async def start(self):
-        if websockets is None:
-            raise RuntimeError("websockets 미설치 — Deepgram 불가")
+        if AsyncDeepgramClient is None:
+            raise RuntimeError("deepgram-sdk 미설치 — Deepgram 불가")
+        self._client = AsyncDeepgramClient(api_key=self.api_key)
         self._task = asyncio.create_task(self._run(), name="deepgram-stt")
         try:
             await asyncio.wait_for(self._connected.wait(), timeout=self.connect_timeout)
@@ -109,15 +94,20 @@ class DeepgramSTT:
             backoff = min(backoff * 2, 8.0)
 
     async def _connect_once(self):
-        headers = {"Authorization": f"Token {self.api_key}"}
-        async with websockets.connect(
-            self._url(), additional_headers=headers,
-            ping_interval=20, ping_timeout=10, open_timeout=self.connect_timeout,
-        ) as ws:
+        async with self._client.listen.v1.connect(
+            model="nova-3",
+            language=self.language,
+            encoding="linear16",
+            sample_rate=16000,
+            channels=1,
+            interim_results=True,
+            punctuate=True,
+            endpointing=300,
+        ) as conn:
             self._connected.set()
-            self.on_log("[deepgram] 연결됨")
-            send = asyncio.create_task(self._send_loop(ws))
-            recv = asyncio.create_task(self._recv_loop(ws))
+            self.on_log(f"[deepgram] 연결됨 (nova-3, {self.language})")
+            send = asyncio.create_task(self._send_loop(conn))
+            recv = asyncio.create_task(self._recv_loop(conn))
             try:
                 done, pending = await asyncio.wait({send, recv}, return_when=asyncio.FIRST_COMPLETED)
             finally:
@@ -136,20 +126,25 @@ class DeepgramSTT:
                 if exc and not isinstance(exc, asyncio.CancelledError):
                     raise exc
 
-    async def _send_loop(self, ws):
+    async def _send_loop(self, conn):
         while not self._stop.is_set():
             try:
                 pcm = await asyncio.wait_for(self._out_q.get(), timeout=1.0)
             except asyncio.TimeoutError:
                 continue
-            await ws.send(pcm)
+            await conn.send_media(pcm)
 
-    async def _recv_loop(self, ws):
-        async for raw in ws:
-            if isinstance(raw, (bytes, bytearray)):
+    async def _recv_loop(self, conn):
+        async for message in conn:
+            if getattr(message, "type", None) != "Results":
                 continue
             try:
-                msg = json.loads(raw)
-            except Exception:
+                alt = message.channel.alternatives[0]
+            except (AttributeError, IndexError, TypeError):
                 continue
-            self._handle_dg_message(msg)
+            self._handle_dg_message({
+                "type": "Results",
+                "is_final": bool(getattr(message, "is_final", False)),
+                "speech_final": bool(getattr(message, "speech_final", False)),
+                "channel": {"alternatives": [{"transcript": (getattr(alt, "transcript", "") or "")}]},
+            })
