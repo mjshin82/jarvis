@@ -171,7 +171,7 @@
   });
 
   // ---- 뷰 전환 (리로드 없음) ----
-  let meetingTitle = "🎤 Meeting";   // applyMeta 가 갱신; 제목은 뷰에 따라 표시
+  let meetingTitle = "Meeting";   // applyMeta 가 갱신; 제목은 뷰에 따라 표시
   let micSource = "system";          // 회의 입력 소스 (system|remote) — 토글 라벨용
   function setView(v) {
     const nv = (v === "meeting" ? "meeting" : "home");
@@ -232,7 +232,7 @@
   function applyMeta(meta) {
     if (!meta) return;
     const user = meta.user || "?";
-    meetingTitle = meta.partner ? `🎤 ${meta.partner} ↔ ${user}` : "🎤 Meeting";
+    meetingTitle = meta.partner ? `${meta.partner} ↔ ${user}` : "Meeting";
     if (document.body.dataset.view === "meeting") $("title").textContent = meetingTitle;
     const tags = [];
     if (meta.partner_lang) tags.push(`${meta.partner}: ${meta.partner_lang}`);

@@ -51,7 +51,7 @@
 <body>
   <header>
     <img class="app-icon" src="/icon.png" alt="" />
-    <div class="title" id="title">🎤 회의 자막</div>
+    <div class="title" id="title">회의 자막</div>
     <div id="conn">···</div>
   </header>
   <main id="log"></main>
@@ -75,7 +75,7 @@
   function applyMeta(meta) {
     if (!meta) return;
     const user = meta.user || "?";
-    $("title").textContent = meta.partner ? `🎤 ${meta.partner} ↔ ${user}` : "🎤 Meeting";
+    $("title").textContent = meta.partner ? `${meta.partner} ↔ ${user}` : "Meeting";
   }
   function newCard() {
     const card = document.createElement("section");
