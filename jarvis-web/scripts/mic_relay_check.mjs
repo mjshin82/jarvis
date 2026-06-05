@@ -95,6 +95,20 @@ async function main() {
   console.log("publisher→viewer 오디오 binary:", a.isBinary ? "OK" : "FAIL");
   pub.close(); pubViewer.close();
 
+  // 9) publisher 가 navigate 이벤트를 보내면 viewer 가 받는다
+  const navPub = await open(`${BASE}/publish/${KEY}`, { headers: { Authorization: `Bearer ${RELAY}` } });
+  const navViewer = await open(`${BASE}/subscribe/${KEY}?token=${ADMIN}`);
+  const navMsg = (async () => {
+    for (;;) {
+      const m = await nextMsg(navViewer);
+      if (m.text && m.text.includes('"navigate"')) return m.text;
+    }
+  })();
+  navPub.send(JSON.stringify({ kind: "navigate", text: "meeting" }));
+  const nv = await Promise.race([navMsg, new Promise((_, r) => setTimeout(() => r(new Error("timeout")), 3000))]).catch((e) => fail(e.message));
+  console.log("navigate broadcast:", nv.includes('"meeting"') ? "OK" : `FAIL (${nv})`);
+  navPub.close(); navViewer.close();
+
   [recv, send, send2, viewer, viewer2].forEach((w) => w.close());
   process.exit(0);
 }
