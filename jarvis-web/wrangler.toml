@@ -1,4 +1,4 @@
-name = "meeting-web-jarvis"
+name = "jarvis-web"
 main = "src/index.ts"
 compatibility_date = "2024-12-01"
 
