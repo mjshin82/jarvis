@@ -20,6 +20,9 @@ export class MeetingDO {
   private viewers: Set<WebSocket> = new Set();
   private micSender: WebSocket | null = null;
   private micReceiver: WebSocket | null = null;
+  private controlSender: WebSocket | null = null;
+  private controlReceiver: WebSocket | null = null;
+  private lastControlNoReceiverAt = 0;
   private lastNoReceiverAt = 0;
   private lastMicSource: string | null = null;
   private events: RelayEvent[] = [];   // 최근 N개 (deque)
@@ -37,7 +40,7 @@ export class MeetingDO {
     const parts = url.pathname.split("/").filter(Boolean);
     // parts[0] = "__do", parts[1] = role, parts[2..] = key
     const role = parts[1];
-    if (role !== "publish" && role !== "subscribe" && role !== "mic" && role !== "mic-recv") {
+    if (role !== "publish" && role !== "subscribe" && role !== "mic" && role !== "mic-recv" && role !== "control" && role !== "control-recv") {
       return new Response("not found", { status: 404 });
     }
     if (request.headers.get("Upgrade") !== "websocket") {
@@ -54,8 +57,12 @@ export class MeetingDO {
       this.attachViewer(server);
     } else if (role === "mic") {
       this.attachMicSender(server);
-    } else {
+    } else if (role === "mic-recv") {
       this.attachMicReceiver(server);
+    } else if (role === "control") {
+      this.attachControlSender(server);
+    } else {
+      this.attachControlReceiver(server);
     }
 
     return new Response(null, { status: 101, webSocket: client });
@@ -211,6 +218,39 @@ export class MeetingDO {
     });
     ws.addEventListener("close", () => { if (this.micReceiver === ws) this.micReceiver = null; });
     ws.addEventListener("error", () => { if (this.micReceiver === ws) this.micReceiver = null; });
+  }
+
+  private attachControlSender(ws: WebSocket): void {
+    if (this.controlSender) {
+      try {
+        this.safeSend(this.controlSender, this.buildEvent({ kind: "kicked", reason: "replaced" }));
+        this.controlSender.close(1000, "replaced");
+      } catch { /* */ }
+    }
+    this.controlSender = ws;
+    ws.addEventListener("message", (msg) => {
+      const data = (msg as MessageEvent).data as string | ArrayBuffer;
+      if (!this.controlReceiver) {
+        const now = Date.now();
+        if (now - this.lastControlNoReceiverAt > 2000) {
+          this.lastControlNoReceiverAt = now;
+          this.safeSend(ws, { ts: now / 1000, seq: 0, kind: "no_receiver" } as RelayEvent);
+        }
+        return;
+      }
+      try { this.controlReceiver.send(data); } catch { /* 수신측 끊김 */ }
+    });
+    ws.addEventListener("close", () => { if (this.controlSender === ws) this.controlSender = null; });
+    ws.addEventListener("error", () => { if (this.controlSender === ws) this.controlSender = null; });
+  }
+
+  private attachControlReceiver(ws: WebSocket): void {
+    if (this.controlReceiver) {
+      try { this.controlReceiver.close(1000, "replaced"); } catch { /* */ }
+    }
+    this.controlReceiver = ws;
+    ws.addEventListener("close", () => { if (this.controlReceiver === ws) this.controlReceiver = null; });
+    ws.addEventListener("error", () => { if (this.controlReceiver === ws) this.controlReceiver = null; });
   }
 
   // --- helpers ---

@@ -62,6 +62,18 @@ app.get("/mic-recv/:key", async (c) => {
   return forwardToDO(c.env, c.req.param("key"), "mic-recv", c.req.raw);
 });
 
+app.get("/control/:key", async (c) => {
+  if (!requireAdmin(c)) return c.text("unauthorized", 401);
+  if (c.req.header("Upgrade") !== "websocket") return c.text("expected websocket", 426);
+  return forwardToDO(c.env, c.req.param("key"), "control", c.req.raw);
+});
+
+app.get("/control-recv/:key", async (c) => {
+  if (!requireRelayToken(c)) return c.text("unauthorized", 401);
+  if (c.req.header("Upgrade") !== "websocket") return c.text("expected websocket", 426);
+  return forwardToDO(c.env, c.req.param("key"), "control-recv", c.req.raw);
+});
+
 app.get("/:name/meeting", (c) => {
   return new Response(APP_HTML, {
     headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
@@ -92,7 +104,7 @@ function checkSecret(c: any, expected: string): boolean {
   return !!tok && !!expected && tok === expected;
 }
 
-function forwardToDO(env: Env, key: string, role: "publish" | "subscribe" | "mic" | "mic-recv", original: Request): Promise<Response> {
+function forwardToDO(env: Env, key: string, role: "publish" | "subscribe" | "mic" | "mic-recv" | "control" | "control-recv", original: Request): Promise<Response> {
   const id = env.MEETING_DO.idFromName(key);
   const stub = env.MEETING_DO.get(id);
   // DO 가 라우팅에 활용할 내부 경로
