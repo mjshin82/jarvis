@@ -17,7 +17,8 @@ export type EventKind =
   | "mic_source"           // jarvis 가 듣는 소스 상태 (system|remote)
   | "user"
   | "assistant"
-  | "navigate";
+  | "navigate"
+  | "viewers";          // worker → publisher: owner 뷰어 수 통지
 
 export interface MeetingMeta {
   key: string;
@@ -35,6 +36,7 @@ export interface ClientMessage {
   meta?: MeetingMeta;
   reason?: string;
   source?: "system" | "remote";
+  count?: number;
 }
 
 // worker → viewer: 서버 메타 부착
