@@ -169,7 +169,7 @@ class MeetingSession:
         glossary = wordbook.load_glossary_lines(path=wordbook.MEET_PATH)
         ctx = config.MEET_CONTEXT.strip()
         self._tx_system = coach.build_multi_system_prompt(
-            languages.names(self.meta.languages), ctx, glossary)
+            languages.names(self.meta.languages), list(self.meta.languages), ctx, glossary)
 
         use_remote = (settings.get("llm_backend") == "deepseek"
                       and config.DEEPSEEK_API_KEY
@@ -375,7 +375,10 @@ class MeetingSession:
         except Exception as ex:
             self.log(f"[meet] translate error: {ex}")
             return
+        allowed = set(self.meta.languages)        # 룸 밖 언어(LLM 오발) 차단
         for lang, t in out.items():
+            if lang not in allowed:
+                continue
             if entry is not None:
                 entry["translations"][lang] = t
             self._emit("translation", t, lang)

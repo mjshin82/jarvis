@@ -49,5 +49,6 @@ def test_translate_multi_empty_text():
 
 
 def test_build_multi_system_prompt_lists_langs():
-    p = coach.build_multi_system_prompt(["Korean", "Japanese"], "ctx", ["Concode"])
+    p = coach.build_multi_system_prompt(["Korean", "Japanese"], ["ko", "ja"], "ctx", ["Concode"])
     assert "Korean" in p and "Japanese" in p and "Concode" in p
+    assert "ko, ja" in p          # 허용 코드만 명시(전체 4코드 아님)
