@@ -76,6 +76,7 @@ def hash_password(pw: str) -> str:
 # my_name 은 config.USER_NAME 에서 기본값, partner/my 의 언어는 LLM 이 자동 분기.
 _META_STEPS = (
     ("title", "회의 제목을 입력하세요 (Enter=기본)"),
+    ("languages", "언어 코드 — 쉼표로 (Enter=기본: ko,en)"),
     ("vocabulary", "워드북 — 쉼표로 구분 (Enter=기본: Jarvis, 이름)"),
     ("password", "비번 (Enter=자동 생성)"),
 )
@@ -105,6 +106,8 @@ class MeetingSetup:
         v = value.strip()
         if key == "title":
             self.meta.title = v or "회의"
+        elif key == "languages":
+            self.meta.languages = languages.normalize(v)   # 빈 입력 → DEFAULT(ko,en)
         elif key == "vocabulary":
             if v:
                 self.meta.vocabulary = [w.strip() for w in v.split(",") if w.strip()]

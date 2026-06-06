@@ -29,6 +29,7 @@ import console
 import commands
 import json
 import settings
+import languages
 import coach
 import runtime_state
 from mode_intent import mode_intent
@@ -112,8 +113,10 @@ async def main():
                 if not vocab:
                     vocab = ["Jarvis", config.USER_NAME]
                 password = (msg.get("password") or "").strip()
+                langs = languages.normalize(msg.get("languages") or [])
                 await controller.start_meeting(meta=MeetingMeta(
-                    my_name=config.USER_NAME, title=title, vocabulary=vocab, password=password))
+                    my_name=config.USER_NAME, title=title, vocabulary=vocab,
+                    password=password, languages=langs))
             elif kind == "mic_system":
                 mic.router.set_override("local")
             elif kind == "mic_phone":
