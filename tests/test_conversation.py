@@ -148,3 +148,40 @@ def test_teardown_cancels_response_when_leaving_conversing():
         await c._set_idle()                        # teardown 이 response 취소
         assert c.response is None
     asyncio.run(run())
+
+
+def test_on_utterance_conversing_runs_response_then_idle():
+    async def run():
+        c = make_controller()
+        c.follow_up = False
+        await c._to_listening(cue=False)
+        await c.on_utterance(np.zeros(4, dtype=np.float32))
+        assert c.phase is Phase.RESPONDING
+        await c.response                       # 응답 완료 대기
+        assert c.spans["speak"] == ["안녕"]    # transcribe→speak
+        assert c.mode is Mode.IDLE             # follow_up=False → idle
+    asyncio.run(run())
+
+
+def test_after_response_follow_up_relistens():
+    async def run():
+        c = make_controller()           # follow_up=True (기본)
+        await c._to_listening(cue=False)
+        await c.on_utterance(np.zeros(4, dtype=np.float32))
+        await c.response
+        assert c.mode is Mode.CONVERSING and c.phase is Phase.LISTENING
+        await c._cancel(c.watchdog)
+    asyncio.run(run())
+
+
+def test_stop_after_response_goes_idle_even_with_hands_free():
+    async def run():
+        c = make_controller()
+        c.hands_free = True
+        await c._to_listening(cue=False)
+        c.stop_after_response = True
+        await c.on_utterance(np.zeros(4, dtype=np.float32))
+        await c.response
+        assert c.mode is Mode.IDLE
+        assert c.stop_after_response is False
+    asyncio.run(run())

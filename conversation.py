@@ -159,3 +159,69 @@ class ConversationController:
         if self.mode is Mode.CONVERSING and self.phase is Phase.LISTENING:
             self.log("\n⌛ 입력이 없어 대기 상태로 돌아갑니다.")
             await self._set_idle()
+
+    # --- 발화 처리 ---
+    async def on_speech_start(self):
+        """VAD 발화 시작 — 듣는 중이면 무발화 타임아웃 취소."""
+        if self.mode is Mode.CONVERSING and self.phase is Phase.LISTENING:
+            await self._cancel(self.watchdog); self.watchdog = None
+
+    async def on_utterance(self, audio):
+        """VAD 가 확정한 발화 블록."""
+        if self.mode is Mode.TRANSLATE:
+            asyncio.create_task(self.translate_audio(audio))
+            return
+        if self.mode is Mode.CONVERSING and self.phase is Phase.LISTENING:
+            await self._cancel(self.watchdog); self.watchdog = None
+            self.phase = Phase.RESPONDING
+            self._apply_tap()
+            self.response = asyncio.create_task(self._respond_audio(audio))
+
+    async def _respond_audio(self, audio):
+        await self.player.enqueue_file(self.fx["ok"])
+        self.set_status("받아쓰는 중…")
+        try:
+            text = await self.transcribe(audio)
+        finally:
+            self.set_status(None)
+        await self._dispatch_response_text(text, from_voice=True)
+
+    async def _dispatch_response_text(self, text, *, from_voice):
+        if text:
+            intent = self.mode_intent(text)
+            if intent == "meeting":
+                self._log_user(text)
+                if self.web_pub is not None:
+                    self.web_pub.emit("assistant", "🎤 회의 모드로 전환합니다")
+                await self.start_meeting()
+                return
+            if intent == "stop":
+                self._log_user(text)
+                if self.in_meeting():
+                    await self.stop_meeting()
+                else:
+                    await self.stop_translate()
+                return
+            await self.speak(text)
+        else:
+            self.log("🧑 (인식된 음성 없음)" if from_voice else "")
+        await self._wait_output_done()
+        await self._after_response()
+
+    def _log_user(self, text):
+        self.log(f"🧑 {text}")
+        if self.web_pub is not None:
+            self.web_pub.emit("user", text)
+
+    async def _wait_output_done(self):
+        while self.is_output_busy():
+            await asyncio.sleep(0.1)
+
+    async def _after_response(self):
+        if self.stop_after_response:
+            self.stop_after_response = False
+            await self._set_idle()
+        elif self.hands_free or self.follow_up:
+            await self._to_listening(cue=True)
+        else:
+            await self._set_idle()
