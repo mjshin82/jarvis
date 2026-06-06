@@ -8,6 +8,8 @@ import asyncio
 import json
 from urllib.parse import quote
 
+from ws_backoff import reconnect_loop
+
 try:
     import websockets
 except Exception:  # pragma: no cover
@@ -64,23 +66,7 @@ class ControlReceiver:
             await self._handle_message(message)
 
     async def _run(self):
-        backoff = 0.5
-        while not self._stop.is_set():
-            try:
-                await self._connect_once()
-                backoff = 0.5
-            except asyncio.CancelledError:
-                return
-            except Exception as e:
-                self.on_log(f"[control] 수신 연결 끊김/실패: {e} — {backoff:.1f}s 후 재시도")
-            if self._stop.is_set():
-                return
-            try:
-                await asyncio.wait_for(self._stop.wait(), timeout=backoff)
-                return
-            except asyncio.TimeoutError:
-                pass
-            backoff = min(backoff * 2, 8.0)
+        await reconnect_loop(self._connect_once, self._stop, self.on_log, label="control")
 
     async def _connect_once(self):
         headers = {"Authorization": f"Bearer {self.token}"}

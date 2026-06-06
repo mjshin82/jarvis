@@ -80,45 +80,17 @@ export class MeetingDO {
   // --- publisher ---
 
   private attachPublisher(ws: WebSocket): void {
-    // 기존 publisher 가 있으면 강퇴 후 인수 (회의 키 충돌 정책: 새 것이 이김)
-    if (this.publisher) {
-      try {
-        this.safeSend(this.publisher, this.buildEvent({ kind: "kicked", reason: "replaced" }));
-        this.publisher.close(1000, "replaced");
-      } catch {
-        // ignore
-      }
-    }
-    this.publisher = ws;
-    this.notifyViewerCount();   // 재연결한 publisher 에게 현재 owner 수 동기화
-
-    ws.addEventListener("message", (msg) => {
-      const data = (msg as MessageEvent).data;
-      if (data instanceof ArrayBuffer) {
-        // TTS 오디오 — viewer 에게 raw binary broadcast (replay 버퍼 미적재)
-        this.broadcastBinary(data);
-        return;
-      }
-      let parsed: ClientMessage | null = null;
-      try {
-        parsed = JSON.parse(data as string) as ClientMessage;
-      } catch {
-        return;
-      }
-      this.handlePublisherMessage(parsed);
+    this.attachSlot(ws, () => this.publisher, (v) => (this.publisher = v), {
+      kick: true,
+      onMessage: (data) => {
+        if (data instanceof ArrayBuffer) { this.broadcastBinary(data); return; }
+        let parsed: ClientMessage | null = null;
+        try { parsed = JSON.parse(data as string) as ClientMessage; } catch { return; }
+        this.handlePublisherMessage(parsed);
+      },
+      onClose: () => this.broadcast(this.buildEvent({ kind: "publisher_disconnected" })),
     });
-
-    ws.addEventListener("close", () => {
-      if (this.publisher === ws) {
-        this.publisher = null;
-        this.broadcast(this.buildEvent({ kind: "publisher_disconnected" }));
-      }
-    });
-    ws.addEventListener("error", () => {
-      if (this.publisher === ws) {
-        this.publisher = null;
-      }
-    });
+    this.notifyViewerCount();   // 재연결 publisher 에게 현재 owner 수 동기화
   }
 
   private handlePublisherMessage(msg: ClientMessage): void {
@@ -195,88 +167,88 @@ export class MeetingDO {
   // --- 원격 마이크: 브라우저 송신 → jarvis 수신 포워딩 ---
 
   private attachMicSender(ws: WebSocket): void {
-    if (this.micSender) {
-      try {
-        // 밀어내기 전에 통지 — 쫓겨난 admin 이 로컬 마이크를 정리할 수 있게
-        this.safeSend(this.micSender, this.buildEvent({ kind: "kicked", reason: "replaced" }));
-        this.micSender.close(1000, "replaced");
-      } catch { /* */ }
-    }
-    this.micSender = ws;
-    ws.addEventListener("message", (msg) => {
-      const data = (msg as MessageEvent).data as string | ArrayBuffer;
-      if (!this.micReceiver) {
-        const now = Date.now();
-        if (now - this.lastNoReceiverAt > 2000) {   // 프레임마다 통지하지 않도록 디바운스
-          this.lastNoReceiverAt = now;
-          this.safeSend(ws, { ts: now / 1000, seq: 0, kind: "no_receiver" } as RelayEvent);
+    this.attachSlot(ws, () => this.micSender, (v) => (this.micSender = v), {
+      kick: true,
+      onMessage: (data) => {
+        if (!this.micReceiver) {
+          const now = Date.now();
+          if (now - this.lastNoReceiverAt > 2000) {   // 프레임마다 통지하지 않도록 디바운스
+            this.lastNoReceiverAt = now;
+            this.safeSend(ws, { ts: now / 1000, seq: 0, kind: "no_receiver" } as RelayEvent);
+          }
+          return;
         }
-        return;
-      }
-      try {
-        // binary(오디오) 와 string(제어) 둘 다 그대로 전달
-        this.micReceiver.send(data);
-      } catch { /* 수신측 끊김 — 다음 close 에서 정리 */ }
+        try { this.micReceiver.send(data); } catch { /* 수신측 끊김 — 다음 close 에서 정리 */ }
+      },
     });
-    ws.addEventListener("close", () => { if (this.micSender === ws) this.micSender = null; });
-    ws.addEventListener("error", () => { if (this.micSender === ws) this.micSender = null; });
   }
 
   private attachMicReceiver(ws: WebSocket): void {
-    if (this.micReceiver) {
-      try { this.micReceiver.close(1000, "replaced"); } catch { /* */ }
-    }
-    this.micReceiver = ws;
-    ws.addEventListener("message", (msg) => {
-      let parsed: any = null;
-      try {
-        const d = (msg as MessageEvent).data;
-        const raw = typeof d === "string" ? d : new TextDecoder().decode(d as ArrayBuffer);
-        parsed = JSON.parse(raw);
-      } catch { return; }
-      if (parsed && parsed.kind === "mic_source") {
-        this.lastMicSource = parsed.source ?? null;
-        this.broadcast(this.buildEvent({ kind: "mic_source", source: parsed.source }));
-      }
+    this.attachSlot(ws, () => this.micReceiver, (v) => (this.micReceiver = v), {
+      onMessage: (data) => {
+        let parsed: any = null;
+        try {
+          const raw = typeof data === "string" ? data : new TextDecoder().decode(data as ArrayBuffer);
+          parsed = JSON.parse(raw);
+        } catch { return; }
+        if (parsed && parsed.kind === "mic_source") {
+          this.lastMicSource = parsed.source ?? null;
+          this.broadcast(this.buildEvent({ kind: "mic_source", source: parsed.source }));
+        }
+      },
     });
-    ws.addEventListener("close", () => { if (this.micReceiver === ws) this.micReceiver = null; });
-    ws.addEventListener("error", () => { if (this.micReceiver === ws) this.micReceiver = null; });
   }
 
   private attachControlSender(ws: WebSocket): void {
-    if (this.controlSender) {
-      try {
-        this.safeSend(this.controlSender, this.buildEvent({ kind: "kicked", reason: "replaced" }));
-        this.controlSender.close(1000, "replaced");
-      } catch { /* */ }
-    }
-    this.controlSender = ws;
-    ws.addEventListener("message", (msg) => {
-      const data = (msg as MessageEvent).data as string | ArrayBuffer;
-      if (!this.controlReceiver) {
-        const now = Date.now();
-        if (now - this.lastControlNoReceiverAt > 2000) {
-          this.lastControlNoReceiverAt = now;
-          this.safeSend(ws, { ts: now / 1000, seq: 0, kind: "no_receiver" } as RelayEvent);
+    this.attachSlot(ws, () => this.controlSender, (v) => (this.controlSender = v), {
+      kick: true,
+      onMessage: (data) => {
+        if (!this.controlReceiver) {
+          const now = Date.now();
+          if (now - this.lastControlNoReceiverAt > 2000) {
+            this.lastControlNoReceiverAt = now;
+            this.safeSend(ws, { ts: now / 1000, seq: 0, kind: "no_receiver" } as RelayEvent);
+          }
+          return;
         }
-        return;
-      }
-      try { this.controlReceiver.send(data); } catch { /* 수신측 끊김 */ }
+        try { this.controlReceiver.send(data); } catch { /* 수신측 끊김 */ }
+      },
     });
-    ws.addEventListener("close", () => { if (this.controlSender === ws) this.controlSender = null; });
-    ws.addEventListener("error", () => { if (this.controlSender === ws) this.controlSender = null; });
   }
 
   private attachControlReceiver(ws: WebSocket): void {
-    if (this.controlReceiver) {
-      try { this.controlReceiver.close(1000, "replaced"); } catch { /* */ }
-    }
-    this.controlReceiver = ws;
-    ws.addEventListener("close", () => { if (this.controlReceiver === ws) this.controlReceiver = null; });
-    ws.addEventListener("error", () => { if (this.controlReceiver === ws) this.controlReceiver = null; });
+    this.attachSlot(ws, () => this.controlReceiver, (v) => (this.controlReceiver = v), {});
   }
 
   // --- helpers ---
+
+  // 단일슬롯 소켓(publisher/micSender/micReceiver/controlSender/controlReceiver) 공통 부착.
+  // 기존 슬롯이 있으면 (선택)kick 통지 후 close, 새 ws 를 슬롯에 대입, 핸들러 등록.
+  // close/error 시 현재 슬롯이 이 ws 면 비운다(+ 선택 onClose).
+  private attachSlot(
+    ws: WebSocket,
+    get: () => WebSocket | null,
+    set: (v: WebSocket | null) => void,
+    opts: {
+      kick?: boolean;
+      onMessage?: (data: string | ArrayBuffer) => void;
+      onClose?: () => void;
+    },
+  ): void {
+    const cur = get();
+    if (cur) {
+      try {
+        if (opts.kick) this.safeSend(cur, this.buildEvent({ kind: "kicked", reason: "replaced" }));
+        cur.close(1000, "replaced");
+      } catch { /* */ }
+    }
+    set(ws);
+    if (opts.onMessage) {
+      ws.addEventListener("message", (m) => opts.onMessage!((m as MessageEvent).data as string | ArrayBuffer));
+    }
+    ws.addEventListener("close", () => { if (get() === ws) { set(null); opts.onClose?.(); } });
+    ws.addEventListener("error", () => { if (get() === ws) set(null); });
+  }
 
   private buildEvent(msg: ClientMessage): RelayEvent {
     this.seq += 1;
