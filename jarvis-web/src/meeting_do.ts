@@ -76,7 +76,7 @@ export class MeetingDO {
     } else if (role === "subscribe") {
       this.attachViewer(server, "owner");
     } else if (role === "watch") {
-      this.attachWatchPending(server);
+      this.attachWatchPending(server, url.searchParams.get("admin") === "1");
     } else if (role === "mic") {
       this.attachMicSender(server);
     } else if (role === "mic-recv") {
@@ -176,6 +176,15 @@ export class MeetingDO {
       this.attachViewer(ws, "public");   // 이후 meeting_summary 수신
       return;
     }
+    if (msg.kind === "list_response") {
+      let d: any;
+      try { d = JSON.parse(msg.text || "{}"); } catch { return; }
+      const ws = this.pendingArchive.get(d.req);
+      if (!ws) return;
+      this.pendingArchive.delete(d.req);
+      this.safeSend(ws, this.buildEvent({ kind: "meeting_list", text: JSON.stringify({ meetings: d.meetings || [] }) }));
+      return;
+    }
     if (msg.kind === "meeting_summary") {
       this.broadcast(this.buildEvent(msg));
       return;
@@ -202,7 +211,7 @@ export class MeetingDO {
   }
 
   // 공개 자막 소켓: 즉시 붙이지 않고 첫 메시지 {kind:"auth",mid,pw} 검증 후 합류.
-  private attachWatchPending(ws: WebSocket): void {
+  private attachWatchPending(ws: WebSocket, isAdmin: boolean): void {
     let done = false;
     const timer = setTimeout(() => {
       if (!done) { try { ws.close(4003, "no-auth"); } catch { /* */ } }
@@ -211,17 +220,38 @@ export class MeetingDO {
       if (done) return;
       let msg: any;
       try { msg = JSON.parse(typeof evt.data === "string" ? evt.data : ""); } catch { return; }
-      if (!msg || msg.kind !== "auth") return;
-      // 라이브 회의 매칭 → 라이브 합류
-      if (this.currentMeetingId && msg.mid === this.currentMeetingId) {
-        const h = await sha256hex(String(msg.pw || ""));
+      if (!msg) return;
+      // 관리자 목록 요청
+      if (msg.kind === "list") {
         done = true; clearTimeout(timer);
+        if (!isAdmin) { try { ws.close(4003, "admin-only"); } catch { /* */ } return; }
+        if (!this.publisher) { try { ws.close(4003, "no-meeting"); } catch { /* */ } return; }
+        const req = ++this.archiveSeq;
+        this.pendingArchive.set(req, ws);
+        this.safeSend(this.publisher, this.buildEvent({ kind: "list_request", text: JSON.stringify({ req }) }));
+        setTimeout(() => { if (this.pendingArchive.delete(req)) { try { ws.close(4003, "list-timeout"); } catch { /* */ } } }, 10000);
+        return;
+      }
+      if (msg.kind !== "auth") return;
+      done = true; clearTimeout(timer);
+      const live = this.currentMeetingId && msg.mid === this.currentMeetingId;
+      // 관리자: 비번 생략
+      if (isAdmin) {
+        if (live) { this.attachViewer(ws, "public"); return; }
+        if (!this.publisher) { try { ws.close(4003, "no-meeting"); } catch { /* */ } return; }
+        const req = ++this.archiveSeq;
+        this.pendingArchive.set(req, ws);
+        this.safeSend(this.publisher, this.buildEvent({ kind: "archive_request", text: JSON.stringify({ req, mid: msg.mid, admin: true }) }));
+        setTimeout(() => { if (this.pendingArchive.delete(req)) { try { ws.close(4003, "archive-timeout"); } catch { /* */ } } }, 10000);
+        return;
+      }
+      // 비관리자: 라이브 비번검증 / 종료 archive
+      if (live) {
+        const h = await sha256hex(String(msg.pw || ""));
         if (h === this.currentPasswordHash) { this.attachViewer(ws, "public"); }
         else { try { ws.close(4003, "bad-password"); } catch { /* */ } }
         return;
       }
-      // 라이브가 아닌 mid → 종료/과거 회의 archive 요청(jarvis 에 중계)
-      done = true; clearTimeout(timer);
       if (!this.publisher) { try { ws.close(4003, "no-meeting"); } catch { /* */ } return; }
       const req = ++this.archiveSeq;
       this.pendingArchive.set(req, ws);
