@@ -103,7 +103,14 @@ async def main():
             if kind == "meeting_stop":
                 await controller.stop_meeting()
             elif kind == "meeting_start":
-                await controller.start_meeting()
+                from live_translate import MeetingMeta
+                title = (msg.get("title") or "").strip() or "회의"
+                vocab = [v.strip() for v in (msg.get("vocabulary") or [])
+                         if isinstance(v, str) and v.strip()]
+                if not vocab:
+                    vocab = ["Jarvis", config.USER_NAME]
+                await controller.start_meeting(meta=MeetingMeta(
+                    my_name=config.USER_NAME, title=title, vocabulary=vocab))
             elif kind == "mic_system":
                 mic.router.set_override("local")
             elif kind == "mic_phone":
@@ -342,7 +349,7 @@ async def main():
     cmd_ctx["trigger_wake"] = controller.on_wake
     cmd_ctx["start_translate"] = controller.start_translate
     cmd_ctx["stop_translate"] = controller.stop_translate
-    cmd_ctx["start_meeting"] = controller.start_meeting
+    cmd_ctx["start_meeting"] = lambda: controller.start_meeting(interactive=True)
     cmd_ctx["stop_meeting"] = controller.stop_meeting
     cmd_ctx["in_meeting"] = controller.in_meeting
 
