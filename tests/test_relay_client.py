@@ -66,3 +66,15 @@ def test_handle_inbound_ignores_others():
     rc._handle_inbound("not json")               # 안전
     rc._handle_inbound(b"\x00\x01")              # bytes 무시
     assert rc.web_viewer_count == 2
+
+
+def test_emit_includes_lang_when_set():
+    rc = _rc()
+    rc.emit("translation", "hello", lang="ja")
+    assert rc._queue.get_nowait() == {"kind": "translation", "text": "hello", "lang": "ja"}
+
+
+def test_emit_omits_lang_when_empty():
+    rc = _rc()
+    rc.emit("source", "안녕")
+    assert rc._queue.get_nowait() == {"kind": "source", "text": "안녕"}
