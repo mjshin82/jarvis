@@ -121,6 +121,7 @@ export class MeetingDO {
       this.currentPasswordHash = null;
       this.lastMeetingInfo = null;
       this.lastMeetingTitle = null;
+      this.events = [];                  // 회의 종료 — replay 버퍼 비움(다음 회의에 이전 대화 누수 방지)
       this.broadcast(this.buildEvent(msg));
       try { this.publisher?.close(1000, "end"); } catch { /* */ }
       this.publisher = null;
@@ -141,6 +142,7 @@ export class MeetingDO {
         this.currentMeetingId = null;
         this.currentPasswordHash = null;
         this.lastMeetingInfo = null;
+        this.events = [];                // 회의 종료(홈 복귀) — replay 버퍼 비움
       }
       this.broadcast(this.buildEvent(msg));
       return;
@@ -152,6 +154,7 @@ export class MeetingDO {
     }
     if (msg.kind === "meeting_creds") {
       this.evictPublicViewers();   // 새 회의 — 이전 회의 보던 viewer 해제(재인증 강제)
+      this.events = [];            // 새 회의 시작 — 이전 회의 replay 버퍼 잔존 방지(보수적)
       try {
         const c = JSON.parse(msg.text || "{}");
         this.currentMeetingId = c.meeting_id ?? null;

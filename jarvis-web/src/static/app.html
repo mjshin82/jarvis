@@ -397,7 +397,10 @@
       case "navigate":
         showView(ev.text); mic.apply();
         if (ev.text === "meeting") hideMeetingLoading();
-        else $("meeting-share").classList.add("hidden");
+        else {   // 홈 복귀(회의 종료) — 회의 로그 비움(다음 회의에 이전 대화 잔존 방지)
+          $("meeting-share").classList.add("hidden");
+          $("log").innerHTML = ""; lastCard = null;
+        }
         return;
       case "meeting_title":
         meetingTitle = ev.text || "Meeting";

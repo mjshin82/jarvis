@@ -384,13 +384,13 @@ async def main():
     def _save_meeting(record):
         """종료 시 즉시 저장 → 트랜스크립트 있으면 백그라운드 요약 후 갱신."""
         async def _run():
+            lines = record.get("transcript") or []
+            if not lines:
+                return                    # 대화 없는 회의 — DB 저장 안 함
             try:
                 await asyncio.to_thread(store.save, record)
             except Exception as e:
                 console.log(f"회의 저장 실패: {e}")
-                return
-            lines = record.get("transcript") or []
-            if not lines:
                 return
             def _line_text(e):
                 src = e.get("source") or ""
