@@ -73,3 +73,45 @@ def test_constructor_defaults_idle():
     assert c.phase is None
     assert c.response is None and c.watchdog is None
     assert c.hands_free is False and c.stop_after_response is False
+
+
+def test_output_busy_and_mark_web_speaking():
+    now = [100.0]
+    c = make_controller(clock=lambda: now[0])
+    assert c.is_output_busy() is False
+    c.mark_web_speaking(2.0)            # 100 + 2 = 102 까지 busy
+    assert c.is_output_busy() is True
+    now[0] = 103.0
+    assert c.is_output_busy() is False
+    c.player.speaking = True            # 로컬 재생 중이면 busy
+    assert c.is_output_busy() is True
+
+
+def test_apply_tap_per_mode():
+    c = make_controller()
+    # CONVERSING·LISTENING → recognizer feed
+    c.mode = Mode.CONVERSING; c.phase = Phase.LISTENING
+    c._apply_tap()
+    assert c.mic.tap == c._feed_recognizer
+    # RESPONDING → None
+    c.phase = Phase.RESPONDING; c._apply_tap()
+    assert c.mic.tap is None
+    # TRANSLATE → None
+    c.mode = Mode.TRANSLATE; c.phase = None; c._apply_tap()
+    assert c.mic.tap is None
+    # MEETING·LIVE → session.feed
+    sess = FakeSession()
+    c.mode = Mode.MEETING; c.meeting_phase = MeetingPhase.LIVE; c.meeting_session = sess
+    c._apply_tap()
+    assert c.mic.tap == sess.feed_block
+
+
+def test_feed_recognizer_echo_gate():
+    now = [0.0]
+    c = make_controller(clock=lambda: now[0])
+    c.mark_web_speaking(1.0)             # busy until 1.0
+    c._feed_recognizer(np.zeros(4, dtype=np.float32))
+    assert c.recognizer.fed == []        # busy → drop
+    now[0] = 2.0
+    c._feed_recognizer(np.ones(4, dtype=np.float32))
+    assert len(c.recognizer.fed) == 1    # not busy → feed
