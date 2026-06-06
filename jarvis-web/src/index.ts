@@ -128,6 +128,7 @@ function forwardToDO(env: Env, key: string, role: "publish" | "subscribe" | "mic
   // DO 가 라우팅에 활용할 내부 경로
   const internalUrl = new URL(original.url);
   internalUrl.pathname = `/__do/${role}/${encodeURIComponent(key)}`;
+  internalUrl.searchParams.delete("admin");   // 클라이언트가 admin 위조 못하게 — Worker 만 부여
   if (admin) internalUrl.searchParams.set("admin", "1");
   const req = new Request(internalUrl.toString(), original);
   return stub.fetch(req);
