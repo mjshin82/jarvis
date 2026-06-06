@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>회의 목록</title>
+<style>
+  :root { --bg:#fff; --fg:#111418; --muted:#6b7280; --card:#f5f6f8; --border:#e5e7eb; --accent:#2563eb; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0e1116; --fg:#e8eaed; --muted:#9aa0a6; --card:#161a21; --border:#2a2f37; --accent:#60a5fa; } }
+  html, body { margin:0; padding:0; background:var(--bg); color:var(--fg); font-family:-apple-system,system-ui,sans-serif; }
+  header { padding:14px 16px; border-bottom:1px solid var(--border); font-weight:600; }
+  main { max-width:980px; margin:0 auto; width:100%; box-sizing:border-box; padding:16px; }
+  .row { display:block; width:100%; text-align:left; background:var(--card); border:1px solid var(--border);
+    border-radius:12px; padding:12px 14px; margin:10px 0; cursor:pointer; color:var(--fg); font:inherit; }
+  .row .t { font-size:16px; font-weight:600; }
+  .row .d { font-size:13px; color:var(--muted); margin-top:4px; }
+  #msg { color:var(--muted); padding:8px 0; }
+  #gate { position:fixed; inset:0; background:var(--bg); display:flex; align-items:center; justify-content:center; }
+  #gate.hidden { display:none; }
+  .gate-box { display:flex; flex-direction:column; gap:10px; width:min(86vw,300px); }
+  #gate input { font-size:16px; padding:10px; border:1px solid #888; border-radius:8px; }
+  #gate button { font-size:15px; padding:10px; border-radius:8px; cursor:pointer; }
+</style>
+</head>
+<body>
+  <div id="gate" class="hidden">
+    <div class="gate-box">
+      <div style="font-weight:600">🔒 관리자 로그인</div>
+      <input id="gate-pw" type="password" placeholder="관리자 비번" />
+      <button id="gate-go">입장</button>
+    </div>
+  </div>
+  <header>최근 회의</header>
+  <main><div id="msg">불러오는 중…</div><div id="list"></div></main>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const room = decodeURIComponent(location.pathname.split("/").filter(Boolean)[0] || "jarvis");
+  const KEY = "jarvis_admin_pw";
+  function fmt(s) { try { return new Date(s).toLocaleString(); } catch { return s || ""; } }
+  function render(meetings) {
+    const wrap = $("list");
+    wrap.innerHTML = "";
+    if (!meetings || !meetings.length) { $("msg").textContent = "저장된 회의 없음"; return; }
+    $("msg").textContent = "";
+    for (const m of meetings) {
+      const b = document.createElement("button");
+      b.className = "row";
+      b.innerHTML = `<div class="t"></div><div class="d"></div>`;
+      b.querySelector(".t").textContent = m.title || "회의";
+      b.querySelector(".d").textContent = fmt(m.started_at);
+      b.addEventListener("click", () => { location.href = `/${encodeURIComponent(room)}/meeting/${encodeURIComponent(m.id)}`; });
+      wrap.appendChild(b);
+    }
+  }
+  function connect(pw) {
+    const proto = location.protocol === "https:" ? "wss:" : "ws:";
+    const ws = new WebSocket(`${proto}//${location.host}/watch/${encodeURIComponent(room)}?token=${encodeURIComponent(pw)}`);
+    ws.addEventListener("open", () => ws.send(JSON.stringify({ kind: "list" })));
+    ws.addEventListener("message", (e) => {
+      try { const ev = JSON.parse(e.data); if (ev.kind === "meeting_list") render(JSON.parse(ev.text || "{}").meetings); } catch {}
+    });
+    ws.addEventListener("close", (e) => {
+      if (e.code === 4003) {
+        localStorage.removeItem(KEY);
+        $("msg").textContent = "관리자 전용입니다.";
+        $("gate").classList.remove("hidden");
+      }
+    });
+  }
+  $("gate-go").addEventListener("click", () => {
+    const pw = $("gate-pw").value.trim();
+    if (!pw) return;
+    localStorage.setItem(KEY, pw);
+    $("gate").classList.add("hidden");
+    $("msg").textContent = "불러오는 중…";
+    connect(pw);
+  });
+  $("gate-pw").addEventListener("keydown", (e) => { if (e.key === "Enter") $("gate-go").click(); });
+  const saved = localStorage.getItem(KEY) || "";
+  if (saved) connect(saved); else { $("msg").textContent = ""; $("gate").classList.remove("hidden"); }
+})();
+</script>
+</body>
+</html>

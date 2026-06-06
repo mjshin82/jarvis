@@ -17,6 +17,7 @@ import { MeetingDO } from "./meeting_do";
 // HTML 을 텍스트로 번들. wrangler 가 esbuild loader 로 처리.
 import APP_HTML from "./static/app.html";
 import VIEWER_HTML from "./static/viewer.html";
+import LIST_HTML from "./static/list.html";
 import ICON_PNG from "./static/icon.png";
 
 export { MeetingDO };
@@ -86,7 +87,7 @@ app.get("/watch/:key", async (c) => {
 });
 
 app.get("/:name/meeting", (c) => {
-  return new Response(VIEWER_HTML, {
+  return new Response(LIST_HTML, {
     headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
   });
 });
