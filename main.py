@@ -191,7 +191,6 @@ async def main():
     async def speak_response(text: str):
         """입력 텍스트 → LLM → TTS. 텍스트/오디오를 웹으로도 발행.
         TTS 는 원격 마이크 활성 시 웹(폰)으로만, 아니면 로컬 스피커로."""
-        nonlocal web_speaking_until
         console.log(f"🧑 {text}")
         if web_pub is not None:
             web_pub.emit("user", text)
@@ -211,7 +210,7 @@ async def main():
                     pcm16 = (np.clip(wav, -1.0, 1.0) * 32767).astype(np.int16).tobytes()
                     web_pub.emit_audio(pcm16, sr)
                     dur = len(wav) / float(sr)
-                    web_speaking_until = max(web_speaking_until, time.monotonic()) + dur
+                    controller.mark_web_speaking(dur)
                 else:
                     await player.enqueue(wav, sr)
         finally:
@@ -633,6 +632,49 @@ async def main():
     except Exception as e:
         recognizer = None
         console.log(f"스트리밍 STT 비활성 — 배치 STT 폴백: {e}")
+
+    from conversation import ConversationController
+
+    async def _translate_audio(audio):
+        await _translate_bg(audio)
+
+    def _after_meeting_start(sess):
+        # 원본 _begin_meeting 의 로그/리스너 등록 재현
+        console.log(f"🎤 회의를 시작합니다. 회의 번호: {sess.meta.key}")
+        if web_pub is not None:
+            sess.add_listener(web_pub.emit_async)
+            view_base = config.RELAY_URL.replace("wss://", "https://").replace("ws://", "http://")
+            console.log(f"🌐 자막: {view_base}/{sess.meta.key}/meeting")
+
+    def _make_meeting(meta):
+        from live_translate import MeetingSession
+        return MeetingSession(
+            log=console.log, set_status=console.set_status, llm=llm, meta=meta,
+            model=config.MEET_STT_MODEL, realtime_model=config.MEET_STT_REALTIME_MODEL,
+        )
+
+    def _make_setup():
+        from live_translate import MeetingSetup
+        return MeetingSetup(default_my_name=config.USER_NAME)
+
+    async def _dispatch_command(line):
+        cmd_ctx["handled_state"] = False
+        if commands.is_command(line):
+            await commands.dispatch(line, cmd_ctx)
+            return bool(cmd_ctx.get("handled_state"))
+        return False
+
+    controller = ConversationController(
+        mic=mic.router, recognizer=recognizer, player=player, web_pub=web_pub,
+        log=console.log, set_status=console.set_status,
+        speak=speak_response, transcribe=stt.transcribe, translate_audio=_translate_audio,
+        mode_intent=mode_intent, translate_mode=MODE,
+        make_setup=_make_setup, make_meeting=_make_meeting,
+        after_meeting_start=_after_meeting_start, dispatch_command=_dispatch_command,
+        drain_queue=_drain_text_queue,
+        fx={"wake": config.FX_WAKE, "ok": config.FX_OK},
+        follow_up=config.FOLLOW_UP, listen_timeout_s=config.LISTEN_TIMEOUT_S,
+    )
 
     console.set_escape_handler(on_escape)   # Esc → 진행 응답 취소
     idle()
