@@ -8,7 +8,7 @@ workers_dev = true
 # HTML 을 텍스트 모듈로 import (src/index.ts 의 `import MEETING_HTML from "./static/meeting.html"`)
 [[rules]]
 type = "Text"
-globs = ["**/*.html"]
+globs = ["**/*.html", "**/static/i18n.js"]
 fallthrough = true
 
 # PNG 을 바이너리(ArrayBuffer)로 import (헤더 아이콘 / 파비콘)

@@ -9,3 +9,9 @@ declare module "*.png" {
   const content: ArrayBuffer;
   export default content;
 }
+
+// i18n.js 를 텍스트로 import (공용 i18n 시스템, /i18n.js 로 서빙).
+declare module "*/i18n.js" {
+  const content: string;
+  export default content;
+}

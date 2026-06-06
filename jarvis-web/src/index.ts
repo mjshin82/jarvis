@@ -19,6 +19,7 @@ import APP_HTML from "./static/app.html";
 import VIEWER_HTML from "./static/viewer.html";
 import LIST_HTML from "./static/list.html";
 import ICON_PNG from "./static/icon.png";
+import I18N_JS from "./static/i18n.js";
 
 export { MeetingDO };
 
@@ -34,6 +35,10 @@ app.get("/healthz", (c) => c.json({ ok: true }));
 
 app.get("/icon.png", () => new Response(ICON_PNG, {
   headers: { "content-type": "image/png", "cache-control": "public, max-age=86400" },
+}));
+
+app.get("/i18n.js", () => new Response(I18N_JS, {
+  headers: { "content-type": "application/javascript; charset=utf-8", "cache-control": "public, max-age=300" },
 }));
 
 app.get("/subscribe/:key", async (c) => {
