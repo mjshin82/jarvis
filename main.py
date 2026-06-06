@@ -36,6 +36,7 @@ from audio_io import Microphone
 from audio_backend import make_backend
 from stt import STT
 from llm import LLM
+from meeting_store import MeetingStore
 from tts import TTS
 from player import Player
 from wake import WakeWord
@@ -312,7 +313,8 @@ async def main():
         if web_pub is not None:
             sess.add_listener(web_pub.emit_async)
             view_base = config.RELAY_URL.replace("wss://", "https://").replace("ws://", "http://")
-            console.log(f"🌐 자막: {view_base}/{sess.meta.key}/meeting")
+            console.log(f"🔑 회의 ID: {sess.meta.meeting_id}")
+            console.log(f"🌐 자막: {view_base}/{sess.meta.key}/meeting/{sess.meta.meeting_id}")
             web_pub.emit("meeting_title", sess.meta.title)
 
     def _make_meeting(meta):
@@ -333,6 +335,37 @@ async def main():
         await commands.dispatch(line, cmd_ctx)
         return bool(cmd_ctx.get("handled_state"))
 
+    store = MeetingStore("meetings.db")
+
+    def _save_meeting(record):
+        """종료 시 즉시 저장 → 트랜스크립트 있으면 백그라운드 요약 후 갱신."""
+        async def _run():
+            try:
+                await asyncio.to_thread(store.save, record)
+            except Exception as e:
+                console.log(f"회의 저장 실패: {e}")
+                return
+            lines = record.get("transcript") or []
+            if not lines:
+                return
+            text = "\n".join(
+                (e.get("source") or "") +
+                (f" / {e.get('ko') or e.get('en')}" if (e.get("ko") or e.get("en")) else "")
+                for e in lines
+            )
+            try:
+                summary = await llm.summarize(text)
+            except Exception as e:
+                console.log(f"회의 요약 실패: {e}")
+                return
+            if summary:
+                try:
+                    await asyncio.to_thread(store.set_summary, record["id"], summary)
+                    console.log(f"📝 회의 요약 저장됨 (ID {record['id']})")
+                except Exception as e:
+                    console.log(f"요약 저장 실패: {e}")
+        asyncio.create_task(_run())
+
     controller = ConversationController(
         mic=mic.router, recognizer=recognizer, player=player, web_pub=web_pub,
         log=console.log, set_status=console.set_status,
@@ -345,6 +378,7 @@ async def main():
         follow_up=config.FOLLOW_UP, listen_timeout_s=config.LISTEN_TIMEOUT_S,
         hands_free_timeout_s=config.HANDS_FREE_TIMEOUT_S,
         persist_mode=runtime_state.save_mode,
+        save_meeting=_save_meeting,
     )
 
     cmd_ctx["trigger_wake"] = controller.on_wake

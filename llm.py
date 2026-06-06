@@ -234,6 +234,20 @@ class LLM:
             cleaned = _THINK_BLOCK.sub("", full).strip()
             self.history.append({"role": "assistant", "content": cleaned or "(중단됨)"})
 
+    async def summarize(self, text: str) -> str:
+        """회의 트랜스크립트 1회 요약. 현재 백엔드 사용. mock/미설정이면 빈 문자열."""
+        if self._mock or self.client is None or not (text or "").strip():
+            return ""
+        messages = [
+            {"role": "system", "content":
+             "다음 회의 대화를 한국어로 간결히 요약하라. 주요 논의·결정·할 일 위주로 불릿."},
+            {"role": "user", "content": text},
+        ]
+        resp = await self.client.chat.completions.create(
+            model=self.model, messages=messages, extra_body=self.extra,
+        )
+        return (resp.choices[0].message.content or "").strip()
+
     async def respond(self, user_text: str):
         """async generator: 완성된 문장을 하나씩 yield."""
         # Fast-path: 명백한 음악 명령은 LLM 호출 없이 곧장 도구 실행

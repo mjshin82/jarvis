@@ -1,4 +1,6 @@
 # tests/test_meeting_session.py
+import asyncio
+
 import numpy as np
 
 from live_translate import MeetingSession
@@ -63,3 +65,84 @@ def test_setup_empty_keeps_defaults():
     s.submit("")
     assert s.meta.title == "회의"
     assert s.meta.vocabulary == ["Jarvis", "민준"]
+
+
+def test_meeting_id_is_6_hex():
+    from live_translate import new_meeting_id
+    mid = new_meeting_id()
+    assert len(mid) == 6
+    assert all(c in "0123456789abcdef" for c in mid)
+
+
+def test_hash_password_sha256():
+    import hashlib
+    from live_translate import hash_password
+    assert hash_password("hunter2") == hashlib.sha256(b"hunter2").hexdigest()
+
+
+def test_gen_password_len():
+    from live_translate import gen_password
+    assert len(gen_password()) == 6
+
+
+def test_meta_has_new_fields():
+    from live_translate import MeetingMeta
+    m = MeetingMeta(my_name="민준", title="주간", password="pw")
+    assert m.meeting_id == "" and m.started_at == "" and m.password == "pw"
+
+
+def test_finalize_meta_assigns_ids():
+    from live_translate import MeetingMeta
+    sess = _sess(meta=MeetingMeta(title="주간"))
+    sess._finalize_meta()
+    assert len(sess.meta.meeting_id) == 6
+    assert len(sess.meta.password) == 6        # 빈 입력 → 자동 생성
+    assert sess.meta.started_at != ""
+
+
+def test_finalize_meta_keeps_given_password():
+    from live_translate import MeetingMeta
+    sess = _sess(meta=MeetingMeta(password="given"))
+    sess._finalize_meta()
+    assert sess.meta.password == "given"
+
+
+def test_record_line_and_translation():
+    sess = _sess()
+    entry = sess._record_line("hello")
+    assert entry["source"] == "hello" and entry["ko"] == "" and entry["en"] == ""
+    assert sess._transcript == [entry]
+    entry["ko"] = "안녕"
+    assert sess._transcript[0]["ko"] == "안녕"
+
+
+def test_record_shape():
+    from live_translate import MeetingMeta, hash_password
+    sess = _sess(meta=MeetingMeta(title="주간", password="pw"))
+    sess.meta.meeting_id = "abc123"
+    sess.meta.started_at = "2026-06-06T10:00:00"
+    sess._record_line("hi")
+    rec = sess.record()
+    assert rec["id"] == "abc123"
+    assert rec["password_hash"] == hash_password("pw")
+    assert rec["title"] == "주간"
+    assert rec["started_at"] == "2026-06-06T10:00:00"
+    assert rec["ended_at"] != ""
+    assert rec["transcript"][0]["source"] == "hi"
+
+
+def test_stop_awaits_pending_translations():
+    """회귀: stop() 이 진행 중 번역 태스크 완료를 기다려야 record() 가 마지막 줄까지 담는다."""
+    async def run():
+        sess = _sess()
+        done = []
+
+        async def slow():
+            await asyncio.sleep(0.01)
+            done.append(True)
+
+        t = asyncio.create_task(slow())
+        sess._tx_tasks.add(t)
+        await sess.stop()
+        assert done == [True]
+    asyncio.run(run())
