@@ -321,7 +321,7 @@
         }
         return;
       case "assistant": addText("assistant", ev.text || ""); return;
-      case "navigate": showView(ev.text); return;
+      case "navigate": showView(ev.text); mic.apply(); return;
       case "hello": applyMeta(ev.meta); return;
       case "info": {
         const card = newCard();
@@ -394,6 +394,7 @@
       case "mic_source":
         micSource = ev.source || "system";
         $("mic-src-toggle").classList.toggle("active", micSource === "remote");   // 붉은=폰
+        mic.apply();   // 낙관적 클릭과 어긋났으면 서버값으로 수렴
         return;
       default: return;
     }
@@ -611,23 +612,13 @@
     sendControl({ kind: "meeting_stop" });
   });
   // ---- 회의 입력 소스 토글 (검정=시스템 / 붉은=폰 — 폰이면 폰 마이크 즉시 스트리밍) ----
-  $("mic-src-toggle").addEventListener("click", async () => {
+  $("mic-src-toggle").addEventListener("click", () => {
     if (!getPw()) { showLogin(); return; }
     ensureAudio();
-    if (micSource === "remote") {
-      // 폰 → 시스템: 스트리밍 중단
-      sendControl({ kind: "mic_system" });
-      if (micOn) { micStop(); micOn = false; }
-      micSource = "system";
-      $("mic-src-toggle").classList.remove("active");
-    } else {
-      // 시스템 → 폰: 폰 마이크 스트리밍 시작 후 소스 전환
-      try { if (!micOn) { await micStart(); micOn = true; } }
-      catch (e) { alert("마이크 권한 실패: " + e.message); return; }
-      sendControl({ kind: "mic_phone" });
-      micSource = "remote";
-      $("mic-src-toggle").classList.add("active");
-    }
+    micSource = (micSource === "remote") ? "system" : "remote";
+    $("mic-src-toggle").classList.toggle("active", micSource === "remote");
+    sendControl({ kind: micSource === "remote" ? "mic_phone" : "mic_system" });
+    mic.apply();
   });
   // ---- + 기능 메뉴 ----
   $("dock-plus").addEventListener("click", (e) => {
@@ -669,25 +660,14 @@
 
   // ---- 음성 토글 (핸즈프리: 마이크 ON + 즉시 청취, 타임아웃 없음) ----
   let voiceOn = false;
-  $("voice-toggle").addEventListener("click", async () => {
+  $("voice-toggle").addEventListener("click", () => {
     const pw = getPw();
     if (!pw) { showLogin(); return; }
     ensureAudio();
     voiceOn = !voiceOn;
     $("voice-toggle").classList.toggle("active", voiceOn);
-    if (voiceOn) {
-      if (!micOn) {
-        try { await micStart(); micOn = true; }
-        catch (e) {
-          alert("마이크 권한 실패: " + e.message);
-          voiceOn = false; $("voice-toggle").classList.remove("active"); return;
-        }
-      }
-      sendControl({ kind: "listen_start" });
-    } else {
-      sendControl({ kind: "listen_stop" });
-      if (micOn) { micStop(); micOn = false; }
-    }
+    sendControl({ kind: voiceOn ? "listen_start" : "listen_stop" });
+    mic.apply();
   });
 
   // ---- 초기화 ----
