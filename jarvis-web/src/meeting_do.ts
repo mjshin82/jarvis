@@ -119,6 +119,7 @@ export class MeetingDO {
       this.lastMeetingInfo = null;
       this.lastMeetingTitle = null;
       this.broadcast(this.buildEvent(msg));
+      this.evictPublicViewers();   // 회의 종료 — 공개 viewer 는 다음 회의 비번 재인증 필요
       try { this.publisher?.close(1000, "end"); } catch { /* */ }
       this.publisher = null;
       return;
@@ -138,6 +139,7 @@ export class MeetingDO {
         this.currentMeetingId = null;
         this.currentPasswordHash = null;
         this.lastMeetingInfo = null;
+        this.evictPublicViewers();   // 회의 종료 — 공개 viewer 강제 해제(다음 회의 재인증)
       }
       this.broadcast(this.buildEvent(msg));
       return;
@@ -170,6 +172,16 @@ export class MeetingDO {
   }
 
   // --- viewer ---
+
+  // 회의 종료 시 공개 viewer 전원 해제 — 다음 회의(같은 방/DO)를 비번 없이 보지 못하게.
+  // 4003 으로 닫으면 viewer.html 이 비번 입력 게이트를 다시 띄운다.
+  private evictPublicViewers(): void {
+    for (const [ws, role] of this.viewers) {
+      if (role === "public") {
+        try { ws.close(4003, "meeting-ended"); } catch { /* */ }
+      }
+    }
+  }
 
   // 공개 자막 소켓: 즉시 붙이지 않고 첫 메시지 {kind:"auth",mid,pw} 검증 후 합류.
   private attachWatchPending(ws: WebSocket): void {
