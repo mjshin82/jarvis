@@ -185,3 +185,71 @@ def test_stop_after_response_goes_idle_even_with_hands_free():
         assert c.mode is Mode.IDLE
         assert c.stop_after_response is False
     asyncio.run(run())
+
+
+def test_on_final_only_when_listening():
+    async def run():
+        c = make_controller()
+        c.follow_up = False
+        # 듣는 중 아님 → 무시
+        c.mode = Mode.IDLE
+        c.on_final("무시될 말")
+        assert c.response is None
+        # 듣는 중 → 응답
+        await c._to_listening(cue=False)
+        c.on_final("진짜 말")
+        assert c.response is not None
+        await c.response
+        assert c.spans["speak"] == ["진짜 말"]
+        assert c.mode is Mode.IDLE
+    asyncio.run(run())
+
+
+def test_start_listening_hands_free_and_stop_listening_idle():
+    async def run():
+        c = make_controller()
+        await c.start_listening(hands_free=True)
+        assert c.mode is Mode.CONVERSING and c.phase is Phase.LISTENING
+        assert c.hands_free is True
+        await c.stop_listening()               # 응답 중 아님 → 즉시 idle
+        assert c.mode is Mode.IDLE and c.hands_free is False
+        await c._cancel(c.watchdog)
+    asyncio.run(run())
+
+
+def test_stop_listening_during_response_sets_flag():
+    async def run():
+        c = make_controller()
+        c.hands_free = True
+        c.mode = Mode.CONVERSING; c.phase = Phase.RESPONDING
+        async def slow(): await asyncio.sleep(10)
+        c.response = asyncio.create_task(slow())
+        await c.stop_listening()
+        assert c.stop_after_response is True
+        assert c.mode is Mode.CONVERSING       # 응답은 계속
+        await c._cancel(c.response)
+    asyncio.run(run())
+
+
+def test_on_text_command_handled_no_idle():
+    async def run():
+        c = make_controller()
+        c.spans["handled"] = True              # dispatch_command → True
+        c.mode = Mode.CONVERSING; c.phase = Phase.LISTENING
+        await c.on_text("/mic")
+        await c.response
+        # 명령이 상태 점유 → idle 강제 안 함(여기선 LISTENING 유지)
+        assert c.mode is Mode.CONVERSING
+        await c._cancel(c.watchdog)
+    asyncio.run(run())
+
+
+def test_on_text_plain_speaks_then_idle():
+    async def run():
+        c = make_controller()
+        c.follow_up = False
+        await c.on_text("오늘 날씨")
+        await c.response
+        assert c.spans["speak"] == ["오늘 날씨"]
+        assert c.mode is Mode.IDLE
+    asyncio.run(run())

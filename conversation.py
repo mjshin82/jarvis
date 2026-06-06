@@ -225,3 +225,62 @@ class ConversationController:
             await self._to_listening(cue=True)
         else:
             await self._set_idle()
+
+    # --- 스트리밍 STT 콜백(이벤트 루프에서 호출됨) ---
+    def on_partial(self, text):
+        self.set_status(f"📝 {text[:80]}")
+        if self.web_pub is not None:
+            self.web_pub.emit("partial", text)
+
+    def on_final(self, text):
+        if not (self.mode is Mode.CONVERSING and self.phase is Phase.LISTENING):
+            return   # stray final 무시
+        self.stop_after_response = False
+        self.phase = Phase.RESPONDING
+        self._apply_tap()
+        self.response = asyncio.create_task(self._respond_after_final((text or "").strip()))
+
+    async def _respond_after_final(self, text):
+        await self._cancel(self.watchdog); self.watchdog = None
+        await self._dispatch_response_text(text, from_voice=True)
+
+    # --- 웹 청취 토글 ---
+    async def start_listening(self, hands_free):
+        self.hands_free = hands_free
+        await self.on_wake()
+
+    async def stop_listening(self):
+        self.hands_free = False
+        if self.response is not None and not self.response.done():
+            self.stop_after_response = True   # 응답 끝까지 두고 끝나면 idle
+        else:
+            await self._set_idle()
+
+    async def on_wake(self):
+        """호출어 / '/mic' — 응답 중단 + 듣기 시작. TRANSLATE·MEETING 에선 무시."""
+        if self.mode in (Mode.TRANSLATE, Mode.MEETING):
+            return
+        self.player.flush()
+        await self._to_listening(cue=True)
+
+    async def request_stop(self):
+        """Esc — 진행 중 응답 취소 후 대기 복귀(대화 모드에 한함)."""
+        if self.mode is Mode.CONVERSING and self.response is not None \
+                and not self.response.done():
+            self.player.flush()
+            self.set_status(None)
+            self.log("⏹  진행 중 응답을 멈췄어요.")
+            await self._set_idle()
+
+    # --- 텍스트 입력 ---
+    async def on_text(self, line):
+        if self.in_meeting_setup():
+            await self._handle_setup_input(line)
+            return
+        self.response = asyncio.create_task(self._respond_text(line))
+
+    async def _respond_text(self, line):
+        handled = await self.dispatch_command(line)
+        if handled:
+            return
+        await self._dispatch_response_text(line, from_voice=False)
