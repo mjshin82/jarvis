@@ -313,6 +313,7 @@ async def main():
             sess.add_listener(web_pub.emit_async)
             view_base = config.RELAY_URL.replace("wss://", "https://").replace("ws://", "http://")
             console.log(f"🌐 자막: {view_base}/{sess.meta.key}/meeting")
+            web_pub.emit("meeting_title", sess.meta.title)
 
     def _make_meeting(meta):
         from live_translate import MeetingSession

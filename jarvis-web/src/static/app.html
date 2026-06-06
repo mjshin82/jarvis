@@ -385,6 +385,10 @@
         showView(ev.text); mic.apply();
         if (ev.text === "meeting") hideMeetingLoading();
         return;
+      case "meeting_title":
+        meetingTitle = ev.text || "Meeting";
+        if (document.body.dataset.view === "meeting") $("title").textContent = meetingTitle;
+        return;
       case "hello": applyMeta(ev.meta); setServerUp(true); return;
       case "info": {
         const card = newCard();

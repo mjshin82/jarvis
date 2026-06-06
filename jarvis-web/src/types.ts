@@ -16,6 +16,7 @@ export type EventKind =
   | "no_receiver"
   | "mic_source"           // jarvis 가 듣는 소스 상태 (system|remote)
   | "mic_release"          // jarvis → owner: 무발화 타임아웃, 웹 마이크 해제 신호
+  | "meeting_title"        // jarvis → owner: 회의 제목(헤더 표시)
   | "user"
   | "assistant"
   | "navigate"
