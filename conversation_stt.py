@@ -19,7 +19,7 @@ class ConversationSTT:
         self._active_kind = None    # "local" | "gladia" | None
 
     def _backend(self) -> str:
-        return self._settings_get("conversation_stt_backend") or "local"
+        return self._settings_get("stt_backend") or "local"
 
     async def _ensure_local(self):
         if self._local is None:
