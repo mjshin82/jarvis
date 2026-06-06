@@ -36,6 +36,8 @@ class MeetingMeta:
     partner_lang: str = ""
     my_name: str = ""
     my_lang: str = ""
+    title: str = ""
+    vocabulary: list = field(default_factory=list)   # STT 보강 단어
 
     @property
     def key(self) -> str:
@@ -43,17 +45,22 @@ class MeetingMeta:
         return config.ROOM_KEY
 
 
-# 메타 입력 단계 — 현재는 없음(상대방 이름을 묻지 않는다).
+# 메타 입력 단계 — title 과 vocabulary 두 단계.
 # my_name 은 config.USER_NAME 에서 기본값, partner/my 의 언어는 LLM 이 자동 분기.
-_META_STEPS = ()
+_META_STEPS = (
+    ("title", "회의 제목을 입력하세요 (Enter=기본)"),
+    ("vocabulary", "워드북 — 쉼표로 구분 (Enter=기본: Jarvis, 이름)"),
+)
 
 
 class MeetingSetup:
-    """메타 입력 진행 상태. 현재 입력 단계가 없어 생성 즉시 done — /meet 가 바로 시작.
+    """메타 입력 진행 상태. title → vocabulary 두 단계 입력 후 done.
     my_name 은 config.USER_NAME 으로 자동 채움."""
 
     def __init__(self, default_my_name: str = "Concode"):
-        self.meta = MeetingMeta(my_name=default_my_name)
+        self._default_vocab = ["Jarvis", default_my_name]
+        self.meta = MeetingMeta(my_name=default_my_name, title="회의",
+                                vocabulary=list(self._default_vocab))
         self.step_index = 0
 
     @property
@@ -65,9 +72,15 @@ class MeetingSetup:
         return _META_STEPS[self.step_index][1] if not self.done else ""
 
     def submit(self, value: str) -> None:
-        """현재 단계 답을 저장하고 다음 단계로 진행."""
+        """현재 단계 답 저장 후 다음 단계로. title/vocabulary 명시 처리(빈 입력→기본)."""
         key, _ = _META_STEPS[self.step_index]
-        setattr(self.meta, key, value.strip())
+        v = value.strip()
+        if key == "title":
+            self.meta.title = v or "회의"
+        elif key == "vocabulary":
+            if v:
+                self.meta.vocabulary = [w.strip() for w in v.split(",") if w.strip()]
+            # 빈 입력이면 기본 vocab 유지
         self.step_index += 1
 
 
