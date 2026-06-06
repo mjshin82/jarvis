@@ -1,4 +1,5 @@
 """회의 기록 로컬 저장(SQLite). 종료 시 1행 저장, 요약은 백그라운드로 나중에 갱신."""
+import hashlib
 import json
 import sqlite3
 
@@ -49,3 +50,22 @@ class MeetingStore:
         with self._conn() as c:
             row = c.execute("SELECT * FROM meetings WHERE id=?", (meeting_id,)).fetchone()
         return dict(row) if row else None
+
+
+def archive_response(row: dict | None, pw: str, req) -> dict:
+    """저장 행(dict|None) + 평문 pw → archive_response 페이로드.
+    pw 해시(sha256, hash_password 와 동일)가 row 의 password_hash 와 일치해야 ok."""
+    pw_hash = hashlib.sha256((pw or "").encode()).hexdigest()
+    if not row or pw_hash != (row.get("password_hash") or ""):
+        return {"req": req, "ok": False}
+    try:
+        transcript = json.loads(row.get("transcript") or "[]")
+    except Exception:
+        transcript = []
+    summary_raw = row.get("summary")
+    try:
+        summaries = json.loads(summary_raw) if summary_raw else {}
+    except Exception:
+        summaries = {}
+    return {"req": req, "ok": True, "title": row.get("title") or "회의",
+            "transcript": transcript, "summaries": summaries}

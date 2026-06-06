@@ -18,6 +18,10 @@ export type EventKind =
   | "meeting_title"        // jarvis → owner: 회의 제목(헤더 표시)
   | "meeting_creds"        // jarvis → DO: 현재 회의 인증(미broadcast). text=JSON{meeting_id,password_hash}
   | "meeting_info"         // jarvis → owner: 공유용 링크/비번/언어. text=JSON{meeting_id,password,languages}
+  | "archive_request"      // DO → jarvis: 종료 회의 열람 요청. text=JSON{req,mid,pw}
+  | "archive_response"     // jarvis → DO: 열람 응답. text=JSON{req,ok,title,transcript,summaries}
+  | "meeting_archive"      // DO → viewer: 종료 회의 기록. text=JSON{title,transcript,summaries}
+  | "meeting_summary"      // jarvis → viewer: 언어별 요약(준비되면). text=JSON{mid,summaries}
   | "user"
   | "assistant"
   | "navigate"

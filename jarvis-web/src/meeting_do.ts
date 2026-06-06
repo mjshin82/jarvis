@@ -19,6 +19,7 @@ interface Env {
 const PUBLIC_KINDS = new Set([
   "hello", "source", "translation", "partial",
   "gap", "info", "end", "kicked", "publisher_disconnected",
+  "meeting_archive", "meeting_summary",
 ]);
 
 async function sha256hex(s: string): Promise<string> {
@@ -39,6 +40,8 @@ export class MeetingDO {
   private lastMicSource: string | null = null;
   private currentView: string | null = null;
   private lastMeetingTitle: string | null = null;
+  private pendingArchive: Map<number, WebSocket> = new Map();
+  private archiveSeq = 0;
   private currentMeetingId: string | null = null;
   private currentPasswordHash: string | null = null;
   private lastMeetingInfo: string | null = null;
@@ -119,7 +122,6 @@ export class MeetingDO {
       this.lastMeetingInfo = null;
       this.lastMeetingTitle = null;
       this.broadcast(this.buildEvent(msg));
-      this.evictPublicViewers();   // 회의 종료 — 공개 viewer 는 다음 회의 비번 재인증 필요
       try { this.publisher?.close(1000, "end"); } catch { /* */ }
       this.publisher = null;
       return;
@@ -139,7 +141,6 @@ export class MeetingDO {
         this.currentMeetingId = null;
         this.currentPasswordHash = null;
         this.lastMeetingInfo = null;
-        this.evictPublicViewers();   // 회의 종료 — 공개 viewer 강제 해제(다음 회의 재인증)
       }
       this.broadcast(this.buildEvent(msg));
       return;
@@ -150,6 +151,7 @@ export class MeetingDO {
       return;
     }
     if (msg.kind === "meeting_creds") {
+      this.evictPublicViewers();   // 새 회의 — 이전 회의 보던 viewer 해제(재인증 강제)
       try {
         const c = JSON.parse(msg.text || "{}");
         this.currentMeetingId = c.meeting_id ?? null;
@@ -160,6 +162,22 @@ export class MeetingDO {
     if (msg.kind === "meeting_info") {
       this.lastMeetingInfo = msg.text ?? null;
       this.broadcast(this.buildEvent(msg));   // 공개는 PUBLIC_KINDS 필터로 차단 → owner 만
+      return;
+    }
+    if (msg.kind === "archive_response") {
+      let d: any;
+      try { d = JSON.parse(msg.text || "{}"); } catch { return; }
+      const ws = this.pendingArchive.get(d.req);
+      if (!ws) return;
+      this.pendingArchive.delete(d.req);
+      if (!d.ok) { try { ws.close(4003, "no-archive"); } catch { /* */ } return; }
+      this.safeSend(ws, this.buildEvent({ kind: "meeting_archive",
+        text: JSON.stringify({ title: d.title, transcript: d.transcript, summaries: d.summaries }) }));
+      this.attachViewer(ws, "public");   // 이후 meeting_summary 수신
+      return;
+    }
+    if (msg.kind === "meeting_summary") {
+      this.broadcast(this.buildEvent(msg));
       return;
     }
     // mic_release: 일시 신호(상태 아님) — owner 에게만 broadcast, replay 미적재.
@@ -185,22 +203,35 @@ export class MeetingDO {
 
   // 공개 자막 소켓: 즉시 붙이지 않고 첫 메시지 {kind:"auth",mid,pw} 검증 후 합류.
   private attachWatchPending(ws: WebSocket): void {
-    let authed = false;
+    let done = false;
     const timer = setTimeout(() => {
-      if (!authed) { try { ws.close(4003, "no-auth"); } catch { /* */ } }
+      if (!done) { try { ws.close(4003, "no-auth"); } catch { /* */ } }
     }, 10000);
     ws.addEventListener("message", async (evt) => {
-      if (authed) return;
+      if (done) return;
       let msg: any;
       try { msg = JSON.parse(typeof evt.data === "string" ? evt.data : ""); } catch { return; }
       if (!msg || msg.kind !== "auth") return;
-      if (!this.currentMeetingId) { try { ws.close(4003, "no-meeting"); } catch { /* */ } return; }
-      if (msg.mid !== this.currentMeetingId) { try { ws.close(4003, "bad-meeting"); } catch { /* */ } return; }
-      const h = await sha256hex(String(msg.pw || ""));
-      if (h !== this.currentPasswordHash) { try { ws.close(4003, "bad-password"); } catch { /* */ } return; }
-      authed = true;
-      clearTimeout(timer);
-      this.attachViewer(ws, "public");
+      // 라이브 회의 매칭 → 라이브 합류
+      if (this.currentMeetingId && msg.mid === this.currentMeetingId) {
+        const h = await sha256hex(String(msg.pw || ""));
+        done = true; clearTimeout(timer);
+        if (h === this.currentPasswordHash) { this.attachViewer(ws, "public"); }
+        else { try { ws.close(4003, "bad-password"); } catch { /* */ } }
+        return;
+      }
+      // 라이브가 아닌 mid → 종료/과거 회의 archive 요청(jarvis 에 중계)
+      done = true; clearTimeout(timer);
+      if (!this.publisher) { try { ws.close(4003, "no-meeting"); } catch { /* */ } return; }
+      const req = ++this.archiveSeq;
+      this.pendingArchive.set(req, ws);
+      this.safeSend(this.publisher, this.buildEvent({
+        kind: "archive_request",
+        text: JSON.stringify({ req, mid: msg.mid, pw: msg.pw }),
+      }));
+      setTimeout(() => {
+        if (this.pendingArchive.delete(req)) { try { ws.close(4003, "archive-timeout"); } catch { /* */ } }
+      }, 10000);
     });
     ws.addEventListener("close", () => clearTimeout(timer));
   }

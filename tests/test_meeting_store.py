@@ -34,3 +34,39 @@ def test_save_is_idempotent_on_id(tmp_path):
     store.save(_rec())
     store.save({**_rec(), "title": "수정"})   # 같은 id → 덮어쓰기(REPLACE)
     assert store.get("abc123")["title"] == "수정"
+
+
+def test_archive_response_ok(tmp_path):
+    import hashlib
+    from meeting_store import MeetingStore, archive_response
+    store = MeetingStore(str(tmp_path / "m.db"))
+    store.save({
+        "id": "m1", "password_hash": hashlib.sha256(b"pw").hexdigest(),
+        "title": "주간", "started_at": "s", "ended_at": "e",
+        "transcript": [{"ts": "t", "source": "hi", "src_lang": "", "translations": {"en": "hi"}}],
+    })
+    store.set_summary("m1", json.dumps({"ko": "요약본"}, ensure_ascii=False))
+    r = archive_response(store.get("m1"), "pw", 7)
+    assert r["ok"] is True and r["req"] == 7 and r["title"] == "주간"
+    assert r["transcript"][0]["source"] == "hi"
+    assert r["summaries"] == {"ko": "요약본"}
+
+
+def test_archive_response_bad_pw_or_missing(tmp_path):
+    import hashlib
+    from meeting_store import MeetingStore, archive_response
+    store = MeetingStore(str(tmp_path / "m.db"))
+    store.save({"id": "m1", "password_hash": hashlib.sha256(b"pw").hexdigest(),
+                "title": "t", "started_at": "", "ended_at": "", "transcript": []})
+    assert archive_response(store.get("m1"), "wrong", 1) == {"req": 1, "ok": False}
+    assert archive_response(None, "x", 2) == {"req": 2, "ok": False}
+
+
+def test_archive_response_null_summary(tmp_path):
+    import hashlib
+    from meeting_store import MeetingStore, archive_response
+    store = MeetingStore(str(tmp_path / "m.db"))
+    store.save({"id": "m1", "password_hash": hashlib.sha256(b"pw").hexdigest(),
+                "title": "t", "started_at": "", "ended_at": "", "transcript": []})
+    r = archive_response(store.get("m1"), "pw", 3)   # summary 아직 NULL
+    assert r["ok"] is True and r["summaries"] == {}
