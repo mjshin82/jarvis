@@ -29,6 +29,7 @@ import commands
 import json
 import settings
 import coach
+import runtime_state
 from mode_intent import mode_intent
 from audio_io import Microphone
 from audio_backend import make_backend
@@ -333,6 +334,7 @@ async def main():
         fx={"wake": config.FX_WAKE, "ok": config.FX_OK},
         follow_up=config.FOLLOW_UP, listen_timeout_s=config.LISTEN_TIMEOUT_S,
         hands_free_timeout_s=config.HANDS_FREE_TIMEOUT_S,
+        persist_mode=runtime_state.save_mode,
     )
 
     cmd_ctx["trigger_wake"] = controller.on_wake
@@ -348,7 +350,15 @@ async def main():
     console.log("🗣️ 스트리밍 STT 준비됨 (호출어 후 실시간 인식)")
 
     console.set_escape_handler(on_escape)   # Esc → 진행 응답 취소
-    await controller._set_idle()
+    _restore = runtime_state.load_mode()
+    if _restore == "meeting":
+        console.log("🎤 이전 회의 모드를 복구합니다.")
+        await controller.start_meeting()
+    elif _restore == "translate":
+        console.log("🌐 이전 번역 모드를 복구합니다.")
+        await controller.start_translate(None)
+    else:
+        await controller._set_idle()
     audio_task = asyncio.create_task(audio_loop())
     collector_task = asyncio.create_task(text_collector())
     worker_task = asyncio.create_task(text_worker())
