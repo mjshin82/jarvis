@@ -162,6 +162,35 @@ def build_multi_system_prompt(lang_names: list, lang_codes: list, context: str, 
         langs=", ".join(lang_names), codes=", ".join(lang_codes), context=ctx, glossary=glossary)
 
 
+_MEET_BILINGUAL_TEMPLATE = """You are a professional simultaneous interpreter for a business meeting between two languages: {a_name} ({a_code}) and {b_name} ({b_code}).
+For each input utterance, detect which of these two languages it is in and translate it into the OTHER one.
+- Input in {a_name} → translate to {b_name}; output {{"{b_code}": "..."}}.
+- Input in {b_name} → translate to {a_name}; output {{"{a_code}": "..."}}.
+Output ONLY that JSON object with exactly one key (the target code). Never output the source language, no other languages, no commentary, no code fences.
+
+Quality rules:
+- Natural and conversational — what a fluent interpreter would actually say, not word-for-word.
+- Preserve proper nouns exactly (see glossary); correct STT near-misses.
+- Never add information not in the source.
+
+Meeting context:
+{context}
+
+Proper nouns glossary (recognize variants, output canonical form):
+{glossary}"""
+
+
+def build_bilingual_system_prompt(lang_names: list, lang_codes: list, context: str, glossary_lines: list) -> str:
+    """언어 2개 회의용 — 상대 언어를 명시한 양방향 지향 프롬프트(오번역에 강함).
+    lang_names/lang_codes 는 길이 2 (룸 언어)."""
+    glossary = "\n".join(f"- {l}" for l in glossary_lines) if glossary_lines else "- (none)"
+    ctx = (context or "").strip() or "(general business meeting)"
+    return _MEET_BILINGUAL_TEMPLATE.format(
+        a_name=lang_names[0], a_code=lang_codes[0],
+        b_name=lang_names[1], b_code=lang_codes[1],
+        context=ctx, glossary=glossary)
+
+
 def _parse_json_obj(s: str) -> dict:
     """LLM 출력에서 JSON 오브젝트만 추출(코드펜스/잡텍스트 방어). 실패 시 {}."""
     import json

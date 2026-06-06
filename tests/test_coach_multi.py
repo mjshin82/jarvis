@@ -52,3 +52,12 @@ def test_build_multi_system_prompt_lists_langs():
     p = coach.build_multi_system_prompt(["Korean", "Japanese"], ["ko", "ja"], "ctx", ["Concode"])
     assert "Korean" in p and "Japanese" in p and "Concode" in p
     assert "ko, ja" in p          # 허용 코드만 명시(전체 4코드 아님)
+
+
+def test_build_bilingual_system_prompt_names_both_directions():
+    p = coach.build_bilingual_system_prompt(["Korean", "English"], ["ko", "en"], "ctx", ["Concode"])
+    assert "Korean" in p and "English" in p
+    assert "ko" in p and "en" in p
+    assert "Concode" in p
+    # 양방향(상대 언어로) 지향이 명시되어야 함
+    assert "OTHER" in p or "the other" in p.lower()

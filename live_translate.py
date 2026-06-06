@@ -168,8 +168,12 @@ class MeetingSession:
         시스템 프롬프트는 한 번만 빌드 — 매 호출 동일하게 보내야 캐시 히트."""
         glossary = wordbook.load_glossary_lines(path=wordbook.MEET_PATH)
         ctx = config.MEET_CONTEXT.strip()
-        self._tx_system = coach.build_multi_system_prompt(
-            languages.names(self.meta.languages), list(self.meta.languages), ctx, glossary)
+        names = languages.names(self.meta.languages)
+        codes = list(self.meta.languages)
+        if len(codes) == 2:        # 2개 언어: 상대 언어 명시 양방향 프롬프트(오번역↓)
+            self._tx_system = coach.build_bilingual_system_prompt(names, codes, ctx, glossary)
+        else:                      # 3개 이상: 멀티타겟
+            self._tx_system = coach.build_multi_system_prompt(names, codes, ctx, glossary)
 
         use_remote = (settings.get("llm_backend") == "deepseek"
                       and config.DEEPSEEK_API_KEY
