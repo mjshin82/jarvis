@@ -328,6 +328,7 @@ async def main():
             web_pub.emit("meeting_info", json.dumps({
                 "meeting_id": sess.meta.meeting_id,
                 "password": sess.meta.password,
+                "languages": list(sess.meta.languages),
             }))
             console.log(f"🔒 비번: {sess.meta.password}")
 
