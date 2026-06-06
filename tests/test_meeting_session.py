@@ -63,3 +63,27 @@ def test_setup_empty_keeps_defaults():
     s.submit("")
     assert s.meta.title == "회의"
     assert s.meta.vocabulary == ["Jarvis", "민준"]
+
+
+def test_meeting_id_is_6_hex():
+    from live_translate import new_meeting_id
+    mid = new_meeting_id()
+    assert len(mid) == 6
+    assert all(c in "0123456789abcdef" for c in mid)
+
+
+def test_hash_password_sha256():
+    import hashlib
+    from live_translate import hash_password
+    assert hash_password("hunter2") == hashlib.sha256(b"hunter2").hexdigest()
+
+
+def test_gen_password_len():
+    from live_translate import gen_password
+    assert len(gen_password()) == 6
+
+
+def test_meta_has_new_fields():
+    from live_translate import MeetingMeta
+    m = MeetingMeta(my_name="민준", title="주간", password="pw")
+    assert m.meeting_id == "" and m.started_at == "" and m.password == "pw"

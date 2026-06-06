@@ -25,6 +25,10 @@ import coach
 import wordbook
 import settings
 from realtime_stt import RealtimeSTTAdapter, to_pcm16
+import hashlib
+import secrets
+import time
+from datetime import datetime
 
 
 # --- 회의 메타 입력 흐름 ---
@@ -38,11 +42,32 @@ class MeetingMeta:
     my_lang: str = ""
     title: str = ""
     vocabulary: list = field(default_factory=list)   # STT 보강 단어
+    meeting_id: str = ""     # 6자리 hex, 회의 시작 시 발급
+    password: str = ""       # 평문(입력/자동). 표시·해시용, DB 미저장
+    started_at: str = ""     # ISO8601, 회의 시작 시각
 
     @property
     def key(self) -> str:
         # 방 key 는 이름 기반 공용 ROOM_KEY (jarvis 1개). 자막·원격 마이크가 같은 방.
         return config.ROOM_KEY
+
+
+def now_iso() -> str:
+    return datetime.now().isoformat(timespec="seconds")
+
+
+def new_meeting_id() -> str:
+    """회의별 로컬 유니크 ID. 생성시간 md5 앞 6자리(소문자 hex)."""
+    return hashlib.md5(repr(time.time()).encode()).hexdigest()[:6]
+
+
+def gen_password() -> str:
+    """비번 미입력 시 자동 생성(6자리 hex)."""
+    return secrets.token_hex(3)
+
+
+def hash_password(pw: str) -> str:
+    return hashlib.sha256((pw or "").encode()).hexdigest()
 
 
 # 메타 입력 단계 — title 과 vocabulary 두 단계.
