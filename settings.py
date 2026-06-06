@@ -3,6 +3,7 @@
 웹 설정 팝업이 편집(apply), 콘솔은 /reload-settings 로 재로드(load)만."""
 import os
 import yaml
+import config
 
 PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "setting.yaml")
 
@@ -10,11 +11,13 @@ DEFAULTS = {
     "translate_backend": "deepseek",   # deepseek | local
     "stt_backend": "gladia",           # gladia | local
     "conversation_stt_backend": "local",  # local | gladia
+    "conversation_llm_backend": "local" if config.LLM_BACKEND == "local" else "deepseek",
 }
 ALLOWED = {
     "translate_backend": {"deepseek", "local"},
     "stt_backend": {"gladia", "local"},
     "conversation_stt_backend": {"gladia", "local"},
+    "conversation_llm_backend": {"deepseek", "local"},
 }
 
 _current = dict(DEFAULTS)

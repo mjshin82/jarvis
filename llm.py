@@ -14,6 +14,7 @@ from datetime import datetime
 from openai import AsyncOpenAI
 
 import config
+import settings
 import wordbook
 from search import web_search
 from music import play_music, stop_music
@@ -73,27 +74,15 @@ def _split_sentences(text: str):
 
 class LLM:
     def __init__(self):
-        self.backend = config.LLM_BACKEND
+        self._mock = (config.LLM_BACKEND == "mock")
+        self.backend = "mock"
         self.client = None
         self.model = None
-
-        if self.backend == "mock":
+        self.extra = {}
+        if self._mock:
             print(f"[llm] ⚠️  MOCK 모드: '{config.MOCK_MESSAGE}' 로만 응답합니다.")
-        elif self.backend == "remote":
-            self.client = AsyncOpenAI(
-                api_key=config.DEEPSEEK_API_KEY, base_url=config.DEEPSEEK_BASE_URL,
-            )
-            self.model = config.DEEPSEEK_MODEL
-            print(f"[llm] REMOTE(DeepSeek) 모드: {self.model}")
-        elif self.backend == "local":
-            self.client = AsyncOpenAI(api_key="ollama", base_url=config.OLLAMA_BASE_URL)
-            self.model = config.LOCAL_MODEL
-            print(f"[llm] LOCAL(Ollama) 모드: {self.model} @ {config.OLLAMA_BASE_URL}")
         else:
-            raise ValueError(f"알 수 없는 LLM_BACKEND: {self.backend!r} (mock|remote|local)")
-
-        # local: 모델을 메모리에 유지(콜드 로드 방지). 매 호출에 keep_alive 전달.
-        self.extra = {"keep_alive": config.OLLAMA_KEEP_ALIVE} if self.backend == "local" else {}
+            self.set_backend(settings.get("conversation_llm_backend"))
 
         # 사용 가능한 도구 구성 (클라이언트 있을 때만)
         self.tools = []
@@ -113,6 +102,27 @@ class LLM:
         # 날짜·시간은 매 응답마다 갱신(_refresh_now)하므로 base 만 보관
         self.base_system = base
         self.history = [{"role": "system", "content": base}]
+
+    def set_backend(self, backend: str) -> None:
+        """대화 LLM 백엔드 전환(deepseek=remote / local=ollama). mock 이면 무시.
+        전제 미충족(예: deepseek 키 없음) 시 사용 가능한 쪽으로 폴백."""
+        if self._mock:
+            return
+        want = "remote" if backend == "deepseek" else "local"
+        has_remote = bool(config.DEEPSEEK_API_KEY and config.DEEPSEEK_API_KEY != "sk-your-key-here")
+        if want == "remote" and not has_remote:
+            want = "local"
+        if want == "remote":
+            self.client = AsyncOpenAI(api_key=config.DEEPSEEK_API_KEY, base_url=config.DEEPSEEK_BASE_URL)
+            self.model = config.DEEPSEEK_MODEL
+            self.extra = {}
+            self.backend = "remote"
+        else:
+            self.client = AsyncOpenAI(api_key="ollama", base_url=config.OLLAMA_BASE_URL)
+            self.model = config.LOCAL_MODEL
+            self.extra = {"keep_alive": config.OLLAMA_KEEP_ALIVE}
+            self.backend = "local"
+        print(f"[llm] 대화 LLM 백엔드: {self.backend} ({self.model})")
 
     def _refresh_now(self):
         """현재 날짜·시간을 시스템 메시지에 반영(매 턴 갱신). 날짜/시간 질문 대응."""
