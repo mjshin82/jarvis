@@ -50,6 +50,7 @@ export interface ClientMessage {
   kind: EventKind;
   text?: string;
   lang?: string;
+  lid?: number;        // 소스 줄 id — source/translation 버블 매칭
   meta?: MeetingMeta;
   reason?: string;
   source?: "system" | "remote";

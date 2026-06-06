@@ -68,19 +68,22 @@ class RelayClient:
             self.on_log(f"[relay] 연결 시간 초과: {self.base_url}")
             return False
 
-    def emit(self, kind: str, text: str = "", lang: str = "") -> None:
-        """이벤트 enqueue (동기). 큐가 가득 차면 드롭(콘솔에 경고)."""
+    def emit(self, kind: str, text: str = "", lang: str = "", lid=None) -> None:
+        """이벤트 enqueue (동기). 큐가 가득 차면 드롭(콘솔에 경고).
+        lid: 소스 줄 id(번역을 정확한 버블에 매칭하기 위한 상관 태그)."""
         msg = {"kind": kind, "text": text}
         if lang:
             msg["lang"] = lang
+        if lid is not None:
+            msg["lid"] = lid
         try:
             self._queue.put_nowait(msg)
         except asyncio.QueueFull:
             self.on_log("[relay] 큐 가득참 — 메시지 드롭")
 
-    async def emit_async(self, kind: str, text: str = "", lang: str = "") -> None:
+    async def emit_async(self, kind: str, text: str = "", lang: str = "", lid=None) -> None:
         """MeetingSession.add_listener 가 async 콜백을 기대하므로 await 가능 래퍼."""
-        self.emit(kind, text, lang)
+        self.emit(kind, text, lang, lid)
 
     def emit_audio(self, pcm_bytes: bytes, sr: int) -> None:
         """TTS PCM(int16 LE)을 binary 프레임으로 enqueue: [4B sr LE][int16 PCM]."""

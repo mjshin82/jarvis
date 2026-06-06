@@ -156,6 +156,7 @@ class MeetingSession:
         self._tx_system = ""
         self._tx_label = ""   # 화면 안내용
         self._transcript: list[dict] = []    # [{ts, source, ko, en}] — 회의 기록
+        self._line_seq = 0                   # 소스 줄 id(번역 버블 매칭용 lid)
         self._tx_tasks: set = set()           # 진행 중 번역 태스크 (종료 시 대기)
 
     def add_listener(self, callback) -> None:
@@ -230,6 +231,7 @@ class MeetingSession:
     async def start(self) -> None:
         self._finalize_meta()
         self._transcript = []
+        self._line_seq = 0
         self._loop = asyncio.get_running_loop()
         self._final_q = asyncio.Queue()
 
@@ -321,8 +323,9 @@ class MeetingSession:
         if self._final_q is not None:
             self._final_q.put_nowait((text or "").strip())
 
-    def _emit(self, kind: str, text: str, lang: str = "") -> None:
-        """회의 이벤트를 콘솔 + listener 들로 fan-out. translation 은 lang 동반."""
+    def _emit(self, kind: str, text: str, lang: str = "", lid=None) -> None:
+        """회의 이벤트를 콘솔 + listener 들로 fan-out. translation 은 lang 동반.
+        lid: 소스 줄 id — 번역을 정확한 버블에 매칭하기 위한 상관 태그."""
         flags = {"ko": "🇰🇷", "en": "🇺🇸", "ja": "🇯🇵", "zh": "🇨🇳"}
         prefix = {"source": "🧑", "info": "🎤", "gap": ""}.get(kind, "")
         if kind == "translation":
@@ -337,7 +340,7 @@ class MeetingSession:
             self.log(text)
         for cb in self._listeners:
             try:
-                result = cb(kind, text, lang)
+                result = cb(kind, text, lang, lid)
                 if asyncio.iscoroutine(result):
                     asyncio.create_task(result)
             except Exception as e:
@@ -363,13 +366,15 @@ class MeetingSession:
             if not first:
                 self._emit("gap", "")
             first = False
-            self._emit("source", text)
+            lid = self._line_seq
+            self._line_seq += 1
+            self._emit("source", text, lid=lid)
             entry = self._record_line(text)
-            t = asyncio.create_task(self._translate_bg(text, entry))
+            t = asyncio.create_task(self._translate_bg(text, entry, lid))
             self._tx_tasks.add(t)
             t.add_done_callback(self._tx_tasks.discard)
 
-    async def _translate_bg(self, text: str, entry: dict | None = None):
+    async def _translate_bg(self, text: str, entry: dict | None = None, lid=None):
         """룸의 나머지 모든 언어로 번역(단일 호출). 각 언어를 translation 이벤트로 emit."""
         if len(self.meta.languages) <= 1:
             return                       # 룸 언어 1개 — 번역 대상 없음(전사·요약만)
@@ -387,4 +392,4 @@ class MeetingSession:
                 continue
             if entry is not None:
                 entry["translations"][lang] = t
-            self._emit("translation", t, lang)
+            self._emit("translation", t, lang, lid)

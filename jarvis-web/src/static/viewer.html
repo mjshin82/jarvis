@@ -248,13 +248,16 @@ if(__exports != exports)module.exports = exports;return module.exports}));
         let card;
         if (draftCard) { card = draftCard; card.classList.remove("draft"); card.innerHTML = `<div class="src">🧑 ${escapeHtml(ev.text || "")}</div>`; draftCard = null; }
         else { card = newCard(); card.innerHTML = `<div class="src">🧑 ${escapeHtml(ev.text || "")}</div>`; }
+        if (ev.lid != null) card.dataset.lid = ev.lid;   // 번역 매칭용 줄 id
         lastCard = card; break;
       }
       case "translation": {
         const map = { ko: ["🇰🇷", "ko"], en: ["🇺🇸", "en"], ja: ["🇯🇵", "ja"], zh: ["🇨🇳", "zh"] };
         const [sym, cls] = map[ev.lang] || ["🌐", ""];
         const html = `<div class="tx ${cls}">${sym} ${escapeHtml(ev.text || "")}</div>`;
-        if (lastCard) lastCard.insertAdjacentHTML("beforeend", html);
+        let card = (ev.lid != null) ? $("log").querySelector(`.card[data-lid="${ev.lid}"]`) : null;
+        card = card || lastCard;   // lid 카드 없으면 마지막 카드(폴백)
+        if (card) card.insertAdjacentHTML("beforeend", html);
         else { const c = newCard(); c.innerHTML = html; lastCard = c; }
         break;
       }
