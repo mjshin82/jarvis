@@ -18,7 +18,8 @@ _BASE = "https://api.gladia.io"
 
 class GladiaSTT:
     def __init__(self, api_key, *, model="solaria-1", languages=("ko", "en"),
-                 on_partial, on_final, on_log=print, connect_timeout=5.0):
+                 on_partial, on_final, on_log=print, connect_timeout=5.0,
+                 vocabulary=()):
         self.api_key = api_key
         self.model = model or "solaria-1"
         self.languages = list(languages) or ["ko", "en"]
@@ -26,13 +27,14 @@ class GladiaSTT:
         self.on_final = on_final
         self.on_log = on_log
         self.connect_timeout = connect_timeout
+        self.vocabulary = list(vocabulary)
         self._out_q: asyncio.Queue = asyncio.Queue(maxsize=2000)
         self._stop = asyncio.Event()
         self._connected = asyncio.Event()
         self._task = None
 
     def _config(self):
-        return {
+        cfg = {
             "encoding": "wav/pcm",
             "bit_depth": 16,
             "sample_rate": 16000,
@@ -44,6 +46,19 @@ class GladiaSTT:
                 "receive_final_transcripts": True,
             },
         }
+        if self.vocabulary:
+            lang = self.languages[0] if self.languages else "ko"
+            cfg["realtime_processing"] = {
+                "custom_vocabulary": True,
+                "custom_vocabulary_config": {
+                    "default_intensity": 0.5,
+                    "vocabulary": [
+                        {"value": w, "intensity": 0.5, "pronunciations": [], "language": lang}
+                        for w in self.vocabulary
+                    ],
+                },
+            }
+        return cfg
 
     def _init_session(self):
         """동기 REST — 스레드에서 호출. 세션 ws url 반환."""

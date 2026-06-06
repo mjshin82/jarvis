@@ -323,23 +323,27 @@ class ConversationController:
         self.log("🌐 번역 모드 종료.")
 
     # --- MEETING ---
-    async def start_meeting(self):
+    async def start_meeting(self, meta=None, interactive=False):
         if self.mode is Mode.MEETING:
             self.log("회의 모드가 이미 진행 중입니다.")
             return
         await self._teardown()
         self.player.flush()
         self.drain_queue()
+        if meta is not None:                       # 웹 폼/직접 메타 → 즉시 시작
+            self.mode = Mode.MEETING
+            await self._begin_meeting(meta)
+            return
         setup = self.make_setup()
         self.mode = Mode.MEETING
-        if not setup.done:
+        if interactive and not setup.done:         # 콘솔 /meet → 프롬프트
             self.meeting_phase = MeetingPhase.SETUP
             self.meeting_setup = setup
             self._apply_tap()
-            self.log(f"🎤 회의 시작 전 정보를 입력해주세요. (Esc 로 취소)")
+            self.log("🎤 회의 설정 — 항목을 입력하세요. (Esc 로 취소)")
             self.log(f"   {setup.prompt}")
             return
-        await self._begin_meeting(setup.meta)
+        await self._begin_meeting(setup.meta)      # 음성/복구 → 기본값 즉시
 
     async def _begin_meeting(self, meta):
         try:
@@ -376,10 +380,7 @@ class ConversationController:
             await self._set_idle()
             self.log("🎤 회의 시작을 취소했어요.")
             return
-        if not stripped:
-            self.log(f"   {setup.prompt}")
-            return
-        setup.submit(stripped)
+        setup.submit(stripped)   # 빈 입력은 해당 단계 기본값 수락(Enter=기본).
         if not setup.done:
             self.log(f"   {setup.prompt}")
             return

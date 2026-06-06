@@ -33,6 +33,7 @@ export class MeetingDO {
   private lastNoReceiverAt = 0;
   private lastMicSource: string | null = null;
   private currentView: string | null = null;
+  private lastMeetingTitle: string | null = null;
   private events: RelayEvent[] = [];   // 최근 N개 (deque)
   private seq = 0;
   private meta: MeetingMeta | null = null;
@@ -120,6 +121,12 @@ export class MeetingDO {
     // (append 하면 이후 접속한 viewer 가 replay 로 받아 회의가 아닐 때도 /meeting 으로 이동함)
     if (msg.kind === "navigate") {
       this.currentView = msg.text ?? null;
+      if (msg.text !== "meeting") this.lastMeetingTitle = null;   // 회의 종료 시 제목 초기화
+      this.broadcast(this.buildEvent(msg));
+      return;
+    }
+    if (msg.kind === "meeting_title") {
+      this.lastMeetingTitle = msg.text ?? null;
       this.broadcast(this.buildEvent(msg));
       return;
     }
@@ -155,6 +162,9 @@ export class MeetingDO {
       }
       if (this.currentView === "meeting") {
         this.safeSend(ws, this.buildEvent({ kind: "navigate", text: "meeting" }));
+      }
+      if (this.lastMeetingTitle) {
+        this.safeSend(ws, this.buildEvent({ kind: "meeting_title", text: this.lastMeetingTitle }));
       }
       if (!this.publisher) {
         this.safeSend(ws, this.buildEvent({ kind: "publisher_disconnected" }));

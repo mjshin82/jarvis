@@ -313,11 +313,30 @@ def test_meeting_setup_two_phase_then_input():
         setup = FakeSetup(done=False)
         sess = FakeSession()
         c = make_controller(make_setup=lambda: setup, make_meeting=lambda meta: sess)
-        await c.start_meeting()
+        await c.start_meeting(interactive=True)
         assert c.mode is Mode.MEETING and c.meeting_phase is MeetingPhase.SETUP
         await c.on_text("상대이름")             # setup 입력 → done → LIVE
         assert c.meeting_phase is MeetingPhase.LIVE
         assert sess.started is True
+    asyncio.run(run())
+
+
+def test_meeting_setup_empty_accepts_defaults():
+    """회귀: 회의 설정 단계에서 빈 Enter(Enter=기본)가 단계를 넘기고 기본값으로 시작한다."""
+    from live_translate import MeetingSetup
+    async def run():
+        sess = FakeSession()
+        setup = MeetingSetup(default_my_name="민준")
+        c = make_controller(make_setup=lambda: setup, make_meeting=lambda meta: sess)
+        await c.start_meeting(interactive=True)
+        assert c.meeting_phase is MeetingPhase.SETUP
+        await c.on_text("")                      # title 단계 Enter=기본
+        assert c.meeting_phase is MeetingPhase.SETUP   # 아직 vocabulary 단계
+        await c.on_text("")                      # vocabulary 단계 Enter=기본 → 시작
+        assert c.meeting_phase is MeetingPhase.LIVE
+        assert sess.started is True
+        assert setup.meta.title == "회의"
+        assert setup.meta.vocabulary == ["Jarvis", "민준"]
     asyncio.run(run())
 
 
@@ -415,4 +434,23 @@ def test_persist_mode_meeting_on_begin():
         c = make_controller(make_meeting=lambda meta: sess)
         await c.start_meeting()
         assert "meeting" in c.spans.get("persist", [])
+    asyncio.run(run())
+
+
+def test_start_meeting_with_meta_skips_setup():
+    async def run():
+        sess = FakeSession()
+        c = make_controller(make_meeting=lambda meta: sess)
+        await c.start_meeting(meta="DIRECT")     # 메타 직접 → 즉시 LIVE
+        assert c.mode is Mode.MEETING and c.meeting_phase is MeetingPhase.LIVE
+        assert sess.started is True
+    asyncio.run(run())
+
+
+def test_start_meeting_default_no_prompt():
+    async def run():
+        sess = FakeSession()
+        c = make_controller(make_meeting=lambda meta: sess)   # FakeSetup done=True
+        await c.start_meeting()                  # interactive=False → 기본값 즉시 시작
+        assert c.meeting_phase is MeetingPhase.LIVE
     asyncio.run(run())

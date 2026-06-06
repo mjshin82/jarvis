@@ -36,6 +36,8 @@ class MeetingMeta:
     partner_lang: str = ""
     my_name: str = ""
     my_lang: str = ""
+    title: str = ""
+    vocabulary: list = field(default_factory=list)   # STT 보강 단어
 
     @property
     def key(self) -> str:
@@ -43,17 +45,22 @@ class MeetingMeta:
         return config.ROOM_KEY
 
 
-# 메타 입력 단계 — 현재는 없음(상대방 이름을 묻지 않는다).
+# 메타 입력 단계 — title 과 vocabulary 두 단계.
 # my_name 은 config.USER_NAME 에서 기본값, partner/my 의 언어는 LLM 이 자동 분기.
-_META_STEPS = ()
+_META_STEPS = (
+    ("title", "회의 제목을 입력하세요 (Enter=기본)"),
+    ("vocabulary", "워드북 — 쉼표로 구분 (Enter=기본: Jarvis, 이름)"),
+)
 
 
 class MeetingSetup:
-    """메타 입력 진행 상태. 현재 입력 단계가 없어 생성 즉시 done — /meet 가 바로 시작.
+    """메타 입력 진행 상태. title → vocabulary 두 단계 입력 후 done.
     my_name 은 config.USER_NAME 으로 자동 채움."""
 
     def __init__(self, default_my_name: str = "Concode"):
-        self.meta = MeetingMeta(my_name=default_my_name)
+        self._default_vocab = ["Jarvis", default_my_name]
+        self.meta = MeetingMeta(my_name=default_my_name, title="회의",
+                                vocabulary=list(self._default_vocab))
         self.step_index = 0
 
     @property
@@ -65,9 +72,15 @@ class MeetingSetup:
         return _META_STEPS[self.step_index][1] if not self.done else ""
 
     def submit(self, value: str) -> None:
-        """현재 단계 답을 저장하고 다음 단계로 진행."""
+        """현재 단계 답 저장 후 다음 단계로. title/vocabulary 명시 처리(빈 입력→기본)."""
         key, _ = _META_STEPS[self.step_index]
-        setattr(self.meta, key, value.strip())
+        v = value.strip()
+        if key == "title":
+            self.meta.title = v or "회의"
+        elif key == "vocabulary":
+            if v:
+                self.meta.vocabulary = [w.strip() for w in v.split(",") if w.strip()]
+            # 빈 입력이면 기본 vocab 유지
         self.step_index += 1
 
 
@@ -171,6 +184,7 @@ class MeetingSession:
                 self._stt = GladiaSTT(
                     config.GLADIA_API_KEY, model=config.MEET_GLADIA_MODEL, languages=langs,
                     on_partial=self._stt_partial, on_final=self._stt_final, on_log=self.log,
+                    vocabulary=self.meta.vocabulary,
                 )
                 await self._stt.start()
                 self.log(f"🎤 회의 STT: Gladia ({config.MEET_GLADIA_MODEL}, {config.MEET_GLADIA_LANGUAGES})")
@@ -179,17 +193,20 @@ class MeetingSession:
                 self.log(f"Gladia 연결 실패 — 로컬 STT 폴백: {e}")
 
         if self._stt is None:
-            wb_prompt = wordbook.load_initial_prompt(path=wordbook.MEET_PATH)
+            wb_prompt = wordbook.load_initial_prompt(path=wordbook.MEET_PATH) or ""
+            vocab_str = ", ".join(self.meta.vocabulary)
+            prompt = ", ".join(p for p in (wb_prompt, vocab_str) if p) or None
             self._rt = RealtimeSTTAdapter(
                 on_partial=self._stt_partial, on_final=self._stt_final,
                 model=self.model, realtime_model=self.realtime_model, language=self.language,
-                initial_prompt=wb_prompt, on_log=self.log,
+                initial_prompt=prompt, on_log=self.log,
             )
             await self._rt.start()
 
         # 번역기 + final 소비자는 두 백엔드 공통
         self._setup_translator()
         self._consumer_task = asyncio.create_task(self._consume_finals())
+        self.log(f"🎤 회의 시작: {self.meta.title or '회의'}")
         self.log(f"🎤 회의 모드 시작 (번역: {self._tx_label}). 끝내려면 /stop.")
 
     async def stop(self) -> None:

@@ -135,6 +135,18 @@
     border-top-color: var(--accent); border-radius: 50%; animation: spin 0.9s linear infinite; }
   #meeting-loading .lbl { color: var(--muted); font-size: 15px; }
   @keyframes spin { to { transform: rotate(360deg); } }
+  #meeting-form { position: fixed; inset: 0; background: #0008; z-index: 26;
+    display: flex; align-items: center; justify-content: center; }
+  #meeting-form.hidden { display: none; }
+  #meeting-form .sheet { background: var(--bg); color: var(--fg); border: 1px solid var(--border);
+    border-radius: 14px; padding: 16px; width: min(92vw, 360px); }
+  #meeting-form .sheet-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  #meeting-form .sheet-head button { background: transparent; color: var(--fg); padding: 4px 8px; }
+  #meeting-form .row { margin: 12px 0; }
+  #meeting-form .row > div { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  #meeting-form input[type="text"] { width: 100%; font-size: 15px; padding: 10px; border-radius: 8px;
+    border: 1px solid #888; box-sizing: border-box; }
+  #mf-start { width: 100%; margin-top: 12px; }
   #mode-toast { position: fixed; top: 64px; left: 50%; transform: translateX(-50%) translateY(-8px);
     background: var(--accent); color: #fff; padding: 8px 16px; border-radius: 999px; font-size: 14px;
     z-index: 40; opacity: 0; pointer-events: none; transition: opacity .25s, transform .25s; box-shadow: 0 2px 10px #0005; }
@@ -159,6 +171,14 @@
   <div id="meeting-loading" class="hidden">
     <div class="spinner"></div>
     <div class="lbl">회의 준비 중…</div>
+  </div>
+  <div id="meeting-form" class="hidden">
+    <div class="sheet">
+      <div class="sheet-head"><b>회의 시작</b><button id="mf-cancel">✕</button></div>
+      <div class="row"><div>회의 제목</div><input id="mf-title" type="text" placeholder="회의 제목" /></div>
+      <div class="row"><div>워드북 (쉼표 구분)</div><input id="mf-vocab" type="text" placeholder="Jarvis, 이름" /></div>
+      <button id="mf-start">시작</button>
+    </div>
   </div>
   <div id="mode-toast"></div>
 
@@ -364,6 +384,10 @@
       case "navigate":
         showView(ev.text); mic.apply();
         if (ev.text === "meeting") hideMeetingLoading();
+        return;
+      case "meeting_title":
+        meetingTitle = ev.text || "Meeting";
+        if (document.body.dataset.view === "meeting") $("title").textContent = meetingTitle;
         return;
       case "hello": applyMeta(ev.meta); setServerUp(true); return;
       case "info": {
@@ -638,9 +662,19 @@
   }
   $("menu-meet").addEventListener("click", () => {
     if (!getPw()) { showLogin(); return; }
-    showMeetingLoading();
-    sendControl({ kind: "meeting_start" });
     $("plus-menu").classList.add("hidden");
+    $("mf-title").value = ""; $("mf-vocab").value = "";
+    $("meeting-form").classList.remove("hidden");
+    $("mf-title").focus();
+  });
+  $("mf-cancel").addEventListener("click", () => $("meeting-form").classList.add("hidden"));
+  $("meeting-form").addEventListener("click", (e) => { if (e.target === $("meeting-form")) $("meeting-form").classList.add("hidden"); });
+  $("mf-start").addEventListener("click", () => {
+    const title = $("mf-title").value.trim();
+    const vocab = $("mf-vocab").value.split(",").map((s) => s.trim()).filter(Boolean);
+    $("meeting-form").classList.add("hidden");
+    showMeetingLoading();
+    sendControl({ kind: "meeting_start", title, vocabulary: vocab });
   });
   // ---- 설정 모달 ----
   function fillSettings(s) {
@@ -683,6 +717,7 @@
       $("conn").classList.remove("ok"); $("conn").classList.add("bad");
       $("plus-menu").classList.add("hidden");        // 열린 메뉴/설정/로딩 닫기
       $("settings-modal").classList.add("hidden");
+      $("meeting-form").classList.add("hidden");
       hideMeetingLoading();
       if (voiceOn) { voiceOn = false; $("voice-toggle").classList.remove("active"); mic.apply(); }
     }

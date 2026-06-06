@@ -103,7 +103,14 @@ async def main():
             if kind == "meeting_stop":
                 await controller.stop_meeting()
             elif kind == "meeting_start":
-                await controller.start_meeting()
+                from live_translate import MeetingMeta
+                title = (msg.get("title") or "").strip() or "회의"
+                vocab = [v.strip() for v in (msg.get("vocabulary") or [])
+                         if isinstance(v, str) and v.strip()]
+                if not vocab:
+                    vocab = ["Jarvis", config.USER_NAME]
+                await controller.start_meeting(meta=MeetingMeta(
+                    my_name=config.USER_NAME, title=title, vocabulary=vocab))
             elif kind == "mic_system":
                 mic.router.set_override("local")
             elif kind == "mic_phone":
@@ -306,6 +313,7 @@ async def main():
             sess.add_listener(web_pub.emit_async)
             view_base = config.RELAY_URL.replace("wss://", "https://").replace("ws://", "http://")
             console.log(f"🌐 자막: {view_base}/{sess.meta.key}/meeting")
+            web_pub.emit("meeting_title", sess.meta.title)
 
     def _make_meeting(meta):
         from live_translate import MeetingSession
@@ -342,7 +350,7 @@ async def main():
     cmd_ctx["trigger_wake"] = controller.on_wake
     cmd_ctx["start_translate"] = controller.start_translate
     cmd_ctx["stop_translate"] = controller.stop_translate
-    cmd_ctx["start_meeting"] = controller.start_meeting
+    cmd_ctx["start_meeting"] = lambda: controller.start_meeting(interactive=True)
     cmd_ctx["stop_meeting"] = controller.stop_meeting
     cmd_ctx["in_meeting"] = controller.in_meeting
 
@@ -352,6 +360,7 @@ async def main():
     console.log("🗣️ 스트리밍 STT 준비됨 (호출어 후 실시간 인식)")
 
     console.set_escape_handler(on_escape)   # Esc → 진행 응답 취소
+    console.set_empty_submit_allowed(controller.in_meeting_setup)   # 회의 설정 단계 Enter=기본
     _restore = runtime_state.load_mode()
     if _restore == "meeting":
         console.log("🎤 이전 회의 모드를 복구합니다.")
