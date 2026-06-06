@@ -105,3 +105,20 @@ def test_delete_removes_only_target(tmp_path):
     assert store.get("a") is None
     assert store.get("b") is not None
     store.delete("nope")    # 없는 id 삭제 — 예외 없이 무시
+
+
+def test_lang_text_picks_only_that_language():
+    from meeting_store import lang_text
+    lines = [
+        {"source": "안녕하세요", "translations": {"en": "Hello"}},        # ko 소스(en 번역)
+        {"source": "Nice to meet you", "translations": {"ko": "반갑습니다"}},  # en 소스(ko 번역)
+    ]
+    rooms = ["ko", "en"]
+    assert lang_text(lines, "ko", rooms) == "안녕하세요\n반갑습니다"
+    assert lang_text(lines, "en", rooms) == "Hello\nNice to meet you"
+
+
+def test_lang_text_skips_empty_and_missing():
+    from meeting_store import lang_text
+    lines = [{"source": "안녕", "translations": {}}]   # 번역 실패(둘 다 없음) → src 불명(missing 2개)
+    assert lang_text(lines, "ko", ["ko", "en", "ja"]) == ""

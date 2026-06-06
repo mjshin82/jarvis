@@ -56,15 +56,17 @@
   #gate-pw { font-size: 16px; padding: 10px; border: 1px solid #888; border-radius: 8px; }
   #gate-go { font-size: 15px; padding: 10px; border-radius: 8px; cursor: pointer; }
   #gate-err { color: #c00; font-size: 13px; min-height: 16px; }
-  #summary { max-width: 980px; margin: 0 auto; width: 100%; box-sizing: border-box;
-    padding: 14px 16px; border-bottom: 2px solid var(--border); background: var(--bg); }
-  #summary.hidden { display: none; }
-  #summary-langs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
-  #summary-langs label { cursor: pointer; user-select: none; font-size: 14px; padding: 5px 14px;
+  #view-tabs { max-width: 980px; margin: 0 auto; width: 100%; box-sizing: border-box;
+    padding: 12px 16px 0; display: flex; gap: 8px; flex-wrap: wrap; }
+  #view-tabs.hidden { display: none; }
+  #view-tabs label { cursor: pointer; user-select: none; font-size: 14px; padding: 5px 14px;
     border: 1px solid var(--border); border-radius: 999px; background: var(--bg); }
-  #summary-langs input { position: absolute; opacity: 0; width: 0; height: 0; }
-  #summary-langs label:has(input:checked) { background: var(--accent); color: #fff; border-color: var(--accent); }
-  #summary-body { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+  #view-tabs input { position: absolute; opacity: 0; width: 0; height: 0; }
+  #view-tabs label:has(input:checked) { background: var(--accent); color: #fff; border-color: var(--accent); }
+  #summary-body { max-width: 980px; margin: 10px auto; width: 100%; box-sizing: border-box;
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+  #summary-body.hidden { display: none; }
+  #log.hidden { display: none; }
   .md { font-size: 15px; line-height: 1.55; }
   .md h2 { font-size: 18px; margin: 14px 0 6px; }
   .md h3 { font-size: 16px; margin: 12px 0 6px; }
@@ -173,10 +175,8 @@ if(__exports != exports)module.exports = exports;return module.exports}));
     <div class="title" id="title">회의 자막</div>
     <div id="conn">···</div>
   </header>
-  <div id="summary" class="hidden">
-    <div id="summary-langs"></div>
-    <div id="summary-body" class="md"></div>
-  </div>
+  <div id="view-tabs" class="hidden"></div>
+  <div id="summary-body" class="md hidden"></div>
   <main id="log"></main>
   <div class="lockbar" id="lockbar">↓ 새 자막 보기</div>
 <script>
@@ -210,28 +210,35 @@ if(__exports != exports)module.exports = exports;return module.exports}));
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
-  let _summaries = {}, _summaryLang = "";
-  function renderSummaryBody() {
-    const md = _summaries[_summaryLang] || "";
-    $("summary-body").innerHTML = (typeof marked !== "undefined" && md) ? marked.parse(md) : escapeHtml(md);
+  let _summaries = {}, _tab = "log";   // "log"(대화기록) | 언어코드
+  function applyTab() {
+    if (_tab === "log") {
+      $("log").classList.remove("hidden");
+      $("summary-body").classList.add("hidden");
+    } else {
+      $("log").classList.add("hidden");
+      const md = _summaries[_tab] || "";
+      $("summary-body").innerHTML = (typeof marked !== "undefined" && md) ? marked.parse(md) : escapeHtml(md);
+      $("summary-body").classList.remove("hidden");
+    }
   }
   function renderSummaries(summaries) {
-    const el = $("summary");
     _summaries = summaries || {};
     const langs = Object.keys(_summaries);
-    if (!langs.length) { el.classList.add("hidden"); return; }
-    if (!_summaries[_summaryLang]) _summaryLang = langs[0];   // 선택 유지, 없으면 첫 언어
+    const tabs = $("view-tabs");
+    if (!langs.length) { tabs.classList.add("hidden"); _tab = "log"; applyTab(); return; }
+    if (_tab !== "log" && !_summaries[_tab]) _tab = "log";     // 선택 유지, 없으면 대화기록
     const names = { ko: "🇰🇷 한국어", en: "🇺🇸 English", ja: "🇯🇵 日本語", zh: "🇨🇳 中文" };
-    const lc = $("summary-langs");
-    lc.innerHTML = "";
-    for (const lg of langs) {
+    const opts = [["log", "💬 대화기록"]].concat(langs.map((lg) => [lg, (names[lg] || lg) + " 요약"]));
+    tabs.innerHTML = "";
+    for (const [val, txt] of opts) {
       const label = document.createElement("label");
-      label.innerHTML = `<input type="radio" name="sumlang" value="${lg}" ${lg === _summaryLang ? "checked" : ""}> ${names[lg] || lg}`;
-      label.querySelector("input").addEventListener("change", () => { _summaryLang = lg; renderSummaryBody(); });
-      lc.appendChild(label);
+      label.innerHTML = `<input type="radio" name="vtab" value="${val}" ${val === _tab ? "checked" : ""}> ${txt}`;
+      label.querySelector("input").addEventListener("change", () => { _tab = val; applyTab(); });
+      tabs.appendChild(label);
     }
-    renderSummaryBody();
-    el.classList.remove("hidden");
+    tabs.classList.remove("hidden");
+    applyTab();
   }
   function handle(ev) {
     switch (ev.kind) {

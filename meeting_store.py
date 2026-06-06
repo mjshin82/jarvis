@@ -65,6 +65,20 @@ class MeetingStore:
             c.execute("DELETE FROM meetings WHERE id=?", (meeting_id,))
 
 
+def lang_text(lines, lang, room_langs) -> str:
+    """트랜스크립트에서 한 언어(lang)의 텍스트만 모아 합침.
+    소스언어 = 그 줄의 translations 에 없는 룸 언어(번역 대상에서 빠진 것). 1개로 확정될 때만 source 사용."""
+    out = []
+    for e in (lines or []):
+        tr = e.get("translations") or {}
+        missing = [l for l in (room_langs or []) if l not in tr]
+        src = missing[0] if len(missing) == 1 else None
+        t = (e.get("source") or "") if lang == src else (tr.get(lang) or "")
+        if t and t.strip():
+            out.append(t)
+    return "\n".join(out)
+
+
 def archive_response(row: dict | None, pw: str, req, *, admin: bool = False) -> dict:
     """저장 행(dict|None) + 평문 pw → archive_response 페이로드.
     admin 이면 비번 검사 생략. 아니면 sha256(pw)==password_hash 여야 ok."""

@@ -79,6 +79,7 @@ class LLM:
         self.client = None
         self.model = None
         self.extra = {}
+        self._summary_client = None     # 요약 전용 deepseek 클라이언트(lazy)
         if self._mock:
             print(f"[llm] ⚠️  MOCK 모드: '{config.MOCK_MESSAGE}' 로만 응답합니다.")
         else:
@@ -234,9 +235,21 @@ class LLM:
             cleaned = _THINK_BLOCK.sub("", full).strip()
             self.history.append({"role": "assistant", "content": cleaned or "(중단됨)"})
 
+    def _summary_target(self):
+        """요약 전용 타겟 — deepseek 키 있으면 v4-pro+thinking, 없으면 대화 백엔드 폴백."""
+        key = config.DEEPSEEK_API_KEY
+        if key and key != "sk-your-key-here":
+            if self._summary_client is None:
+                self._summary_client = AsyncOpenAI(api_key=key, base_url=config.DEEPSEEK_BASE_URL)
+            return self._summary_client, config.SUMMARY_MODEL, {"thinking": {"type": "enabled"}}
+        return self.client, self.model, dict(self.extra or {})
+
     async def summarize(self, text: str, lang_name: str = "Korean") -> str:
-        """회의 트랜스크립트 1회 요약(대상 언어). 현재 백엔드 사용. mock/미설정 → ""."""
-        if self._mock or self.client is None or not (text or "").strip():
+        """회의 트랜스크립트 1회 요약(대상 언어). 요약 전용 모델 사용. mock/빈 → ""."""
+        if self._mock or not (text or "").strip():
+            return ""
+        client, model, extra = self._summary_target()
+        if client is None:
             return ""
         messages = [
             {"role": "system", "content": (
@@ -256,8 +269,8 @@ class LLM:
             )},
             {"role": "user", "content": text},
         ]
-        resp = await self.client.chat.completions.create(
-            model=self.model, messages=messages, extra_body=self.extra,
+        resp = await client.chat.completions.create(
+            model=model, messages=messages, extra_body=extra,
         )
         return (resp.choices[0].message.content or "").strip()
 
