@@ -164,19 +164,9 @@ class MeetingSession:
         """DeepSeek 우선, 키 없으면 자비스 본체 LLM 로 폴백.
         시스템 프롬프트는 한 번만 빌드 — 매 호출 동일하게 보내야 캐시 히트."""
         glossary = wordbook.load_glossary_lines(path=wordbook.MEET_PATH)
-        # 메타가 있으면 컨텍스트에 양측 정보를 명시 → 번역 방향성/존중 톤 안정성↑
-        ctx_lines = [config.MEET_CONTEXT.strip()]
-        m = self.meta
-        if m.partner_name or m.my_name:
-            parts = []
-            if m.partner_name:
-                p = m.partner_name + (f" (speaks {m.partner_lang})" if m.partner_lang else "")
-                parts.append(f"Counterpart: {p}")
-            if m.my_name:
-                me = m.my_name + (f" (speaks {m.my_lang})" if m.my_lang else "")
-                parts.append(f"User: {me}")
-            ctx_lines.append(" / ".join(parts))
-        self._tx_system = coach._build_meet_system_prompt("\n".join(ctx_lines), glossary)
+        ctx = config.MEET_CONTEXT.strip()
+        self._tx_system = coach.build_multi_system_prompt(
+            languages.names(self.meta.languages), ctx, glossary)
 
         use_remote = (settings.get("llm_backend") == "deepseek"
                       and config.DEEPSEEK_API_KEY
@@ -322,29 +312,23 @@ class MeetingSession:
         if self._final_q is not None:
             self._final_q.put_nowait((text or "").strip())
 
-    def _emit(self, kind: str, text: str) -> None:
-        """회의 이벤트를 콘솔 + 등록된 listener 들로 fan-out.
-        kind: 'source' | 'translation_ko' | 'translation_en' | 'info' | 'gap' | 'partial'"""
-        # 1) 콘솔 출력 (기존)
-        prefix = {
-            "source": "🧑",
-            "translation_ko": "🌐",
-            "translation_en": "🇺🇸",
-            "info": "🎤",
-            "gap": "",
-        }.get(kind, "")
+    def _emit(self, kind: str, text: str, lang: str = "") -> None:
+        """회의 이벤트를 콘솔 + listener 들로 fan-out. translation 은 lang 동반."""
+        flags = {"ko": "🇰🇷", "en": "🇺🇸", "ja": "🇯🇵", "zh": "🇨🇳"}
+        prefix = {"source": "🧑", "info": "🎤", "gap": ""}.get(kind, "")
+        if kind == "translation":
+            prefix = flags.get(lang, "🌐")
         if kind == "gap":
             self.log("")
         elif kind == "partial":
-            pass    # 콘솔엔 partial 안 찍음 (status 영역이 따로 표시)
+            pass
         elif prefix:
             self.log(f"{prefix} {text}")
         else:
             self.log(text)
-        # 2) listener fan-out (fire-and-forget — listener 실패가 회의 막지 않게)
         for cb in self._listeners:
             try:
-                result = cb(kind, text)
+                result = cb(kind, text, lang)
                 if asyncio.iscoroutine(result):
                     asyncio.create_task(result)
             except Exception as e:
@@ -377,19 +361,16 @@ class MeetingSession:
             t.add_done_callback(self._tx_tasks.discard)
 
     async def _translate_bg(self, text: str, entry: dict | None = None):
-        """양방향 번역. 시스템 프롬프트에 워드북/맥락/few-shot 이 다 들어있고
-        매 호출마다 *정확히 동일* 하게 보내므로 DeepSeek prompt caching 히트."""
-        # local 폴백이면 ollama keep_alive 가 필요, remote 는 빈 dict
+        """룸의 나머지 모든 언어로 번역(단일 호출). 각 언어를 translation 이벤트로 emit."""
         extra = self.llm.extra if self._tx_client is self.llm.client else {}
         try:
-            out = await coach.translate_meeting(
+            out = await coach.translate_multi(
                 self._tx_client, self._tx_model, text, self._tx_system, extra=extra,
             )
         except Exception as ex:
             self.log(f"[meet] translate error: {ex}")
             return
-        if out:
-            kind = "translation_en" if coach.is_korean(text) else "translation_ko"
+        for lang, t in out.items():
             if entry is not None:
-                entry["en" if kind == "translation_en" else "ko"] = out
-            self._emit(kind, out)
+                entry["translations"][lang] = t
+            self._emit("translation", t, lang)

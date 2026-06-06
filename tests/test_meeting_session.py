@@ -156,3 +156,25 @@ def test_setup_password_empty_stays_blank():
     s.submit(""); s.submit(""); s.submit("")
     assert s.done
     assert s.meta.password == ""   # 빈 입력 → 세션 시작 시 자동 생성
+
+
+def test_translate_bg_emits_per_language(monkeypatch):
+    import types as _types
+    import coach
+
+    async def fake_multi(client, model, text, system_prompt, extra=None):
+        return {"en": "hi", "ja": "ya"}
+
+    monkeypatch.setattr(coach, "translate_multi", fake_multi)
+    sess = _sess()
+    sess.llm = _types.SimpleNamespace(client=None, extra={})
+    sess._tx_client = object()
+    sess._tx_model = "m"
+    sess._tx_system = "sys"
+    got = []
+    sess.add_listener(lambda kind, text, lang="": got.append((kind, text, lang)))
+    entry = {"ts": "t", "source": "안녕", "src_lang": "", "translations": {}}
+    asyncio.run(sess._translate_bg("안녕", entry))
+    assert entry["translations"] == {"en": "hi", "ja": "ya"}
+    assert ("translation", "hi", "en") in got
+    assert ("translation", "ya", "ja") in got
