@@ -88,8 +88,8 @@
     background: var(--accent); color: #fff; padding: 8px 16px; border-radius: 999px; font-size: 14px;
     cursor: pointer; box-shadow: 0 2px 10px #0005; }
   #sound-hint.hidden { display: none; }
-  /* dock 가림 방지 — 독 높이(버튼48+패딩20) + iOS 안전영역 만큼 하단 여백 */
-  #chat, #log { padding-bottom: calc(88px + env(safe-area-inset-bottom)); }
+  /* dock 가림 방지: 독 높이(버튼48+패딩) + iOS 안전영역 만큼 하단 여백.
+     ※ #chat/#log 의 padding 단축속성이 이 값을 덮으므로, 각 단축속성의 하단값으로 직접 지정(아래). */
 
   /* 뷰 토글 */
   #home-view, #meeting-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
@@ -97,7 +97,7 @@
   body[data-view="meeting"] #home-view { display: none; }
 
   /* 홈 채팅 */
-  #chat { flex: 1; padding: 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+  #chat { flex: 1; padding: 12px 12px calc(88px + env(safe-area-inset-bottom)); overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
   .bubble { max-width: 80%; padding: 8px 12px; border-radius: 14px; white-space: pre-wrap; line-height: 1.4; }
   .bubble.user { align-self: flex-end; background: var(--accent); color: #fff; }
   .bubble.assistant { align-self: flex-start; background: #8883; }
@@ -105,7 +105,7 @@
   .bubble.draft::after { content: "▍"; margin-left: 2px; animation: blink 1s steps(2, start) infinite; }
 
   /* 회의 자막 */
-  #log { flex: 1; padding: 16px; max-width: 980px; margin: 0 auto; width: 100%; }
+  #log { flex: 1; padding: 16px 16px calc(88px + env(safe-area-inset-bottom)); max-width: 980px; margin: 0 auto; width: 100%; }
   .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; margin: 10px 0; }
   .card.draft { background: transparent; border: 1px dashed var(--border); color: var(--partial); }
   .card.draft .src { color: var(--partial); }
@@ -122,9 +122,11 @@
   .lockbar.show { opacity: 1; pointer-events: auto; }
   @media (max-width: 600px) { .src { font-size: 17px; } .tx { font-size: 16px; } }
 
-  #login { position: fixed; inset: 0; background: #000a; display: flex; flex-direction: column;
-    gap: 12px; align-items: center; justify-content: center; z-index: 20; }
-  #login input { font-size: 16px; padding: 10px; width: 240px; border-radius: 8px; border: 1px solid #888; }
+  #login { position: fixed; inset: 0; background: var(--bg); display: flex; flex-direction: column;
+    gap: 16px; align-items: center; justify-content: center; z-index: 50; }
+  #login input { font-size: 16px; padding: 12px; width: 240px; border-radius: 8px; border: 1px solid #888; box-sizing: border-box; }
+  #login button { font-size: 18px; font-weight: 600; padding: 14px; width: 240px; border-radius: 10px;
+    border: none; background: var(--accent); color: #fff; cursor: pointer; box-sizing: border-box; }
   .hidden { display: none !important; }
 </style>
 </head>
