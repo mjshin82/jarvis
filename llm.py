@@ -82,7 +82,7 @@ class LLM:
         if self._mock:
             print(f"[llm] ⚠️  MOCK 모드: '{config.MOCK_MESSAGE}' 로만 응답합니다.")
         else:
-            self.set_backend(settings.get("conversation_llm_backend"))
+            self.set_backend(settings.get("llm_backend"))
 
         # 사용 가능한 도구 구성 (클라이언트 있을 때만)
         self.tools = []

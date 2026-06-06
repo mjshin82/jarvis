@@ -8,16 +8,12 @@ import config
 PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "setting.yaml")
 
 DEFAULTS = {
-    "translate_backend": "deepseek",   # deepseek | local
-    "stt_backend": "gladia",           # gladia | local
-    "conversation_stt_backend": "local",  # local | gladia
-    "conversation_llm_backend": "local" if config.LLM_BACKEND == "local" else "deepseek",
+    "stt_backend": "gladia",                                                  # gladia | local
+    "llm_backend": "local" if config.LLM_BACKEND == "local" else "deepseek",  # deepseek | local
 }
 ALLOWED = {
-    "translate_backend": {"deepseek", "local"},
     "stt_backend": {"gladia", "local"},
-    "conversation_stt_backend": {"gladia", "local"},
-    "conversation_llm_backend": {"deepseek", "local"},
+    "llm_backend": {"deepseek", "local"},
 }
 
 _current = dict(DEFAULTS)
@@ -53,6 +49,11 @@ def load(path: str = None) -> dict:
         if os.path.exists(p):
             with open(p, "r", encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
+            # 구버전 키 이주: llm_backend 없으면 옛 키(conversation_llm/translate)에서 가져옴.
+            if "llm_backend" not in data:
+                old = data.get("conversation_llm_backend") or data.get("translate_backend")
+                if old:
+                    data["llm_backend"] = old
             _current.update(_valid(data))
         else:
             save(p)

@@ -133,7 +133,7 @@ class MeetingSession:
             ctx_lines.append(" / ".join(parts))
         self._tx_system = coach._build_meet_system_prompt("\n".join(ctx_lines), glossary)
 
-        use_remote = (settings.get("translate_backend") == "deepseek"
+        use_remote = (settings.get("llm_backend") == "deepseek"
                       and config.DEEPSEEK_API_KEY
                       and config.DEEPSEEK_API_KEY != "sk-your-key-here")
         if use_remote:
