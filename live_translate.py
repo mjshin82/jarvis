@@ -24,6 +24,7 @@ import config
 import coach
 import wordbook
 import settings
+import languages
 from realtime_stt import RealtimeSTTAdapter, to_pcm16
 import hashlib
 import secrets
@@ -42,6 +43,7 @@ class MeetingMeta:
     my_lang: str = ""
     title: str = ""
     vocabulary: list = field(default_factory=list)   # STT 보강 단어
+    languages: list = field(default_factory=lambda: ["ko", "en"])   # 룸 언어(정규 코드)
     meeting_id: str = ""     # 6자리 hex, 회의 시작 시 발급
     password: str = ""       # 평문(입력/자동). 표시·해시용, DB 미저장
     started_at: str = ""     # ISO8601, 회의 시작 시각
@@ -202,7 +204,7 @@ class MeetingSession:
 
     def _record_line(self, source: str) -> dict:
         """확정 원문 1줄을 트랜스크립트에 추가하고 entry 반환(번역은 나중에 채움)."""
-        entry = {"ts": now_iso(), "source": source, "ko": "", "en": ""}
+        entry = {"ts": now_iso(), "source": source, "src_lang": "", "translations": {}}
         self._transcript.append(entry)
         return entry
 
@@ -214,6 +216,7 @@ class MeetingSession:
             "title": self.meta.title or "회의",
             "started_at": self.meta.started_at,
             "ended_at": now_iso(),
+            "languages": list(self.meta.languages),
             "transcript": list(self._transcript),
         }
 
@@ -237,7 +240,7 @@ class MeetingSession:
         if settings.get("stt_backend") == "gladia" and config.GLADIA_API_KEY:
             from gladia_stt import GladiaSTT
             try:
-                langs = [s.strip() for s in config.MEET_GLADIA_LANGUAGES.split(",") if s.strip()]
+                langs = languages.gladia_codes(self.meta.languages)
                 self._stt = GladiaSTT(
                     config.GLADIA_API_KEY, model=config.MEET_GLADIA_MODEL, languages=langs,
                     on_partial=self._stt_partial, on_final=self._stt_final, on_log=self.log,

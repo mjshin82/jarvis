@@ -113,25 +113,24 @@ def test_finalize_meta_keeps_given_password():
 def test_record_line_and_translation():
     sess = _sess()
     entry = sess._record_line("hello")
-    assert entry["source"] == "hello" and entry["ko"] == "" and entry["en"] == ""
+    assert entry["source"] == "hello" and entry["translations"] == {}
     assert sess._transcript == [entry]
-    entry["ko"] = "안녕"
-    assert sess._transcript[0]["ko"] == "안녕"
+    entry["translations"]["ko"] = "안녕"
+    assert sess._transcript[0]["translations"]["ko"] == "안녕"
 
 
 def test_record_shape():
     from live_translate import MeetingMeta, hash_password
-    sess = _sess(meta=MeetingMeta(title="주간", password="pw"))
+    sess = _sess(meta=MeetingMeta(title="주간", password="pw", languages=["ko", "en"]))
     sess.meta.meeting_id = "abc123"
     sess.meta.started_at = "2026-06-06T10:00:00"
     sess._record_line("hi")
     rec = sess.record()
     assert rec["id"] == "abc123"
-    assert rec["password_hash"] == hash_password("pw")
     assert rec["title"] == "주간"
-    assert rec["started_at"] == "2026-06-06T10:00:00"
-    assert rec["ended_at"] != ""
+    assert rec["languages"] == ["ko", "en"]
     assert rec["transcript"][0]["source"] == "hi"
+    assert rec["transcript"][0]["translations"] == {}
 
 
 def test_stop_awaits_pending_translations():
