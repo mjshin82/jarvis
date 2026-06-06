@@ -51,13 +51,25 @@ class MeetingStore:
             row = c.execute("SELECT * FROM meetings WHERE id=?", (meeting_id,)).fetchone()
         return dict(row) if row else None
 
+    def recent(self, limit: int = 20) -> list:
+        """최근 회의 메타 목록(시작 시각 내림차순). 목록 페이지용 — 본문/요약 제외."""
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT id, title, started_at, ended_at FROM meetings "
+                "ORDER BY started_at DESC LIMIT ?", (limit,),
+            ).fetchall()
+        return [dict(r) for r in rows]
 
-def archive_response(row: dict | None, pw: str, req) -> dict:
+
+def archive_response(row: dict | None, pw: str, req, *, admin: bool = False) -> dict:
     """저장 행(dict|None) + 평문 pw → archive_response 페이로드.
-    pw 해시(sha256, hash_password 와 동일)가 row 의 password_hash 와 일치해야 ok."""
-    pw_hash = hashlib.sha256((pw or "").encode()).hexdigest()
-    if not row or pw_hash != (row.get("password_hash") or ""):
+    admin 이면 비번 검사 생략. 아니면 sha256(pw)==password_hash 여야 ok."""
+    if not row:
         return {"req": req, "ok": False}
+    if not admin:
+        pw_hash = hashlib.sha256((pw or "").encode()).hexdigest()
+        if pw_hash != (row.get("password_hash") or ""):
+            return {"req": req, "ok": False}
     try:
         transcript = json.loads(row.get("transcript") or "[]")
     except Exception:
