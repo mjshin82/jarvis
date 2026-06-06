@@ -6,6 +6,7 @@ import json
 
 import requests
 from ws_backoff import reconnect_loop
+from realtime_stt import to_pcm16
 
 try:
     import websockets
@@ -60,6 +61,10 @@ class GladiaSTT:
             self._out_q.put_nowait(pcm16)
         except asyncio.QueueFull:
             pass
+
+    def feed_block(self, block) -> None:
+        """float32 블록 → int16 PCM 으로 변환해 큐 적재(RealtimeSTTAdapter 와 동일 인터페이스)."""
+        self.feed_pcm(to_pcm16(block))
 
     def _handle_gladia_message(self, msg) -> None:
         """Gladia transcript 메시지 → on_partial / on_final. (테스트 분리)"""
