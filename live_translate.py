@@ -184,6 +184,7 @@ class MeetingSession:
                 self._stt = GladiaSTT(
                     config.GLADIA_API_KEY, model=config.MEET_GLADIA_MODEL, languages=langs,
                     on_partial=self._stt_partial, on_final=self._stt_final, on_log=self.log,
+                    vocabulary=self.meta.vocabulary,
                 )
                 await self._stt.start()
                 self.log(f"🎤 회의 STT: Gladia ({config.MEET_GLADIA_MODEL}, {config.MEET_GLADIA_LANGUAGES})")
@@ -192,11 +193,13 @@ class MeetingSession:
                 self.log(f"Gladia 연결 실패 — 로컬 STT 폴백: {e}")
 
         if self._stt is None:
-            wb_prompt = wordbook.load_initial_prompt(path=wordbook.MEET_PATH)
+            wb_prompt = wordbook.load_initial_prompt(path=wordbook.MEET_PATH) or ""
+            vocab_str = ", ".join(self.meta.vocabulary)
+            prompt = ", ".join(p for p in (wb_prompt, vocab_str) if p) or None
             self._rt = RealtimeSTTAdapter(
                 on_partial=self._stt_partial, on_final=self._stt_final,
                 model=self.model, realtime_model=self.realtime_model, language=self.language,
-                initial_prompt=wb_prompt, on_log=self.log,
+                initial_prompt=prompt, on_log=self.log,
             )
             await self._rt.start()
 
