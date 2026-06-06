@@ -3,8 +3,7 @@
 export type EventKind =
   | "hello"                // publisher 첫 메시지: meta 전달
   | "source"               // STT 확정 원문
-  | "translation_ko"       // 번역 결과 (한국어)
-  | "translation_en"       // 번역 결과 (영어)
+  | "translation"          // 번역 결과 (lang 필드로 대상 언어: ko|en|ja|zh)
   | "partial"              // STT 부분 결과 (스트리밍)
   | "info"                 // 일반 안내 텍스트
   | "gap"                  // 발화 묶음 사이 빈 줄
@@ -38,6 +37,7 @@ export interface MeetingMeta {
 export interface ClientMessage {
   kind: EventKind;
   text?: string;
+  lang?: string;
   meta?: MeetingMeta;
   reason?: string;
   source?: "system" | "remote";
