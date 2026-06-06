@@ -30,3 +30,4 @@ jarvis-web/.dev.vars
 jarvis-web/.wrangler/
 jarvis-web/dist/
 setting.yaml
+.jarvis_state.json

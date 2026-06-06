@@ -127,6 +127,13 @@
   #login input { font-size: 16px; padding: 12px; width: 240px; border-radius: 8px; border: 1px solid #888; box-sizing: border-box; }
   #login button { font-size: 18px; font-weight: 600; padding: 14px; width: 240px; border-radius: 10px;
     border: none; background: var(--accent); color: #fff; cursor: pointer; box-sizing: border-box; }
+  #meeting-loading { position: fixed; inset: 0; background: var(--bg); z-index: 60;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; }
+  #meeting-loading .spinner { width: 42px; height: 42px; border: 4px solid #8884;
+    border-top-color: var(--accent); border-radius: 50%; animation: spin 0.9s linear infinite; }
+  #meeting-loading .lbl { color: var(--muted); font-size: 15px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #voice-toggle:disabled { opacity: 0.45; cursor: not-allowed; animation: none; }
   .hidden { display: none !important; }
 </style>
 </head>
@@ -135,6 +142,10 @@
     <div>🔒 Jarvis 로그인</div>
     <input id="login-pw" type="password" placeholder="password" />
     <button id="login-go">들어가기</button>
+  </div>
+  <div id="meeting-loading" class="hidden">
+    <div class="spinner"></div>
+    <div class="lbl">회의 준비 중…</div>
   </div>
 
   <header>
@@ -328,8 +339,11 @@
         }
         return;
       case "assistant": addText("assistant", ev.text || ""); return;
-      case "navigate": showView(ev.text); mic.apply(); return;
-      case "hello": applyMeta(ev.meta); return;
+      case "navigate":
+        showView(ev.text); mic.apply();
+        if (ev.text === "meeting") hideMeetingLoading();
+        return;
+      case "hello": applyMeta(ev.meta); setServerUp(true); return;
       case "info": {
         const card = newCard();
         card.innerHTML = `<div class="info">${escapeHtml(ev.text || "")}</div>`;
@@ -381,8 +395,7 @@
       case "end": {
         const card = newCard();
         card.innerHTML = `<div class="info">— 회의 종료 —</div>`;
-        $("conn").textContent = "🛑 publisher ended";
-        $("conn").classList.remove("ok"); $("conn").classList.add("bad");
+        setServerUp(false);
         break;
       }
       case "kicked": {
@@ -391,8 +404,7 @@
         break;
       }
       case "publisher_disconnected": {
-        $("conn").textContent = "⏸ publisher 연결 끊김";
-        $("conn").classList.remove("ok"); $("conn").classList.add("bad");
+        setServerUp(false);
         return;
       }
       case "settings":
@@ -589,8 +601,22 @@
     e.stopPropagation();
     $("plus-menu").classList.toggle("hidden");
   });
+  let meetingLoadTimer = null;
+  function showMeetingLoading() {
+    $("meeting-loading").classList.remove("hidden");
+    clearTimeout(meetingLoadTimer);
+    meetingLoadTimer = setTimeout(() => {
+      hideMeetingLoading();
+      alert("회의 시작에 실패했어요. 다시 시도해주세요.");
+    }, 10000);
+  }
+  function hideMeetingLoading() {
+    clearTimeout(meetingLoadTimer); meetingLoadTimer = null;
+    $("meeting-loading").classList.add("hidden");
+  }
   $("menu-meet").addEventListener("click", () => {
     if (!getPw()) { showLogin(); return; }
+    showMeetingLoading();
     sendControl({ kind: "meeting_start" });
     $("plus-menu").classList.add("hidden");
   });
@@ -625,6 +651,20 @@
     }
   });
 
+  // ---- 서버 상태 추적 ----
+  let serverUp = true;
+  function setServerUp(up) {
+    serverUp = up;
+    $("voice-toggle").disabled = !up;
+    if (up) {
+      $("conn").textContent = "● live";
+      $("conn").classList.remove("bad"); $("conn").classList.add("ok");
+    } else {
+      $("conn").textContent = "⚠ 서버 꺼짐";
+      $("conn").classList.remove("ok"); $("conn").classList.add("bad");
+      if (voiceOn) { voiceOn = false; $("voice-toggle").classList.remove("active"); mic.apply(); }
+    }
+  }
   // ---- 음성 토글 (핸즈프리: 마이크 ON + 즉시 청취, 타임아웃 없음) ----
   let voiceOn = false;
   $("voice-toggle").addEventListener("click", () => {

@@ -33,12 +33,14 @@ class ConversationController:
                  mode_intent, translate_mode, make_setup, make_meeting,
                  after_meeting_start, dispatch_command, fx,
                  drain_queue=lambda: None,
+                 persist_mode=lambda m: None,
                  follow_up=True, listen_timeout_s=8.0, hands_free_timeout_s=30.0,
                  clock=time.monotonic):
         self.mic = mic
         self.recognizer = recognizer
         self.player = player
         self.web_pub = web_pub
+        self.persist_mode = persist_mode
         self.log = log
         self.set_status = set_status
         self.speak = speak
@@ -140,6 +142,7 @@ class ConversationController:
         await self._teardown()
         self.mode = Mode.IDLE
         self.phase = None
+        self.persist_mode("idle")
         self._apply_tap()
         if self.recognizer is not None:
             await self.recognizer.suspend()
@@ -149,6 +152,7 @@ class ConversationController:
         await self._teardown()
         self.mode = Mode.CONVERSING
         self.phase = Phase.LISTENING
+        self.persist_mode("idle")
         if self.recognizer is not None:
             await self.recognizer.resume()
         self._apply_tap()
@@ -306,6 +310,7 @@ class ConversationController:
         self.translate_mode.start_translate(src_lang)
         self.mode = Mode.TRANSLATE
         self.phase = None
+        self.persist_mode("translate")
         self._apply_tap()
         suffix = f" (입력 언어: {src_lang})" if src_lang else " (입력 언어 자동 감지)"
         self.log(f"🌐 번역 모드 시작{suffix}. 끝내려면 /stop.")
@@ -347,6 +352,7 @@ class ConversationController:
         self.meeting_session = sess
         self.meeting_setup = None
         self.meeting_phase = MeetingPhase.LIVE
+        self.persist_mode("meeting")
         self.saved_mic_mode = self.mic.snapshot_mode()   # 종료 시 복원할 소스
         self._apply_tap()                                # tap = sess.feed_block
         if self.web_pub is not None:

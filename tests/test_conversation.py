@@ -61,6 +61,7 @@ def make_controller(**over):
         mode_intent=mode_intent, translate_mode=TM(),
         make_setup=lambda: FakeSetup(), make_meeting=lambda meta: FakeSession(),
         after_meeting_start=lambda sess: spans.setdefault("after", []).append(sess),
+        persist_mode=lambda m: spans.setdefault("persist", []).append(m),
         dispatch_command=dispatch_command, fx={"wake": "w.wav", "ok": "o.wav"},
         follow_up=True, listen_timeout_s=0.05, hands_free_timeout_s=30.0, clock=lambda: 0.0,
     )
@@ -395,4 +396,23 @@ def test_non_handsfree_timeout_idles_without_mic_release():
         await asyncio.sleep(0.06)
         assert c.mode is Mode.IDLE
         assert ("mic_release", "") not in c.web_pub.emits
+    asyncio.run(run())
+
+
+def test_persist_mode_idle_and_translate():
+    async def run():
+        c = make_controller()
+        await c._set_idle()
+        assert "idle" in c.spans.get("persist", [])
+        await c.start_translate("en")
+        assert c.spans["persist"][-1] == "translate"
+    asyncio.run(run())
+
+
+def test_persist_mode_meeting_on_begin():
+    async def run():
+        sess = FakeSession()
+        c = make_controller(make_meeting=lambda meta: sess)
+        await c.start_meeting()
+        assert "meeting" in c.spans.get("persist", [])
     asyncio.run(run())
