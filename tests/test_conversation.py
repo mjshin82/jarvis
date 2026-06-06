@@ -313,7 +313,7 @@ def test_meeting_setup_two_phase_then_input():
         setup = FakeSetup(done=False)
         sess = FakeSession()
         c = make_controller(make_setup=lambda: setup, make_meeting=lambda meta: sess)
-        await c.start_meeting()
+        await c.start_meeting(interactive=True)
         assert c.mode is Mode.MEETING and c.meeting_phase is MeetingPhase.SETUP
         await c.on_text("상대이름")             # setup 입력 → done → LIVE
         assert c.meeting_phase is MeetingPhase.LIVE
@@ -415,4 +415,23 @@ def test_persist_mode_meeting_on_begin():
         c = make_controller(make_meeting=lambda meta: sess)
         await c.start_meeting()
         assert "meeting" in c.spans.get("persist", [])
+    asyncio.run(run())
+
+
+def test_start_meeting_with_meta_skips_setup():
+    async def run():
+        sess = FakeSession()
+        c = make_controller(make_meeting=lambda meta: sess)
+        await c.start_meeting(meta="DIRECT")     # 메타 직접 → 즉시 LIVE
+        assert c.mode is Mode.MEETING and c.meeting_phase is MeetingPhase.LIVE
+        assert sess.started is True
+    asyncio.run(run())
+
+
+def test_start_meeting_default_no_prompt():
+    async def run():
+        sess = FakeSession()
+        c = make_controller(make_meeting=lambda meta: sess)   # FakeSetup done=True
+        await c.start_meeting()                  # interactive=False → 기본값 즉시 시작
+        assert c.meeting_phase is MeetingPhase.LIVE
     asyncio.run(run())
