@@ -1,4 +1,6 @@
 # tests/test_meeting_session.py
+import asyncio
+
 import numpy as np
 
 from live_translate import MeetingSession
@@ -127,3 +129,20 @@ def test_record_shape():
     assert rec["started_at"] == "2026-06-06T10:00:00"
     assert rec["ended_at"] != ""
     assert rec["transcript"][0]["source"] == "hi"
+
+
+def test_stop_awaits_pending_translations():
+    """회귀: stop() 이 진행 중 번역 태스크 완료를 기다려야 record() 가 마지막 줄까지 담는다."""
+    async def run():
+        sess = _sess()
+        done = []
+
+        async def slow():
+            await asyncio.sleep(0.01)
+            done.append(True)
+
+        t = asyncio.create_task(slow())
+        sess._tx_tasks.add(t)
+        await sess.stop()
+        assert done == [True]
+    asyncio.run(run())

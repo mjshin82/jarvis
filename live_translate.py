@@ -148,6 +148,7 @@ class MeetingSession:
         self._tx_system = ""
         self._tx_label = ""   # 화면 안내용
         self._transcript: list[dict] = []    # [{ts, source, ko, en}] — 회의 기록
+        self._tx_tasks: set = set()           # 진행 중 번역 태스크 (종료 시 대기)
 
     def add_listener(self, callback) -> None:
         """매 _emit 호출 시 callback(kind, text) 가 함께 불린다.
@@ -283,6 +284,13 @@ class MeetingSession:
             except Exception:
                 self._consumer_task.cancel()
         self._consumer_task = None
+        # 진행 중 번역 완료 대기 — record() 가 마지막 줄 번역까지 담도록(짧은 타임아웃)
+        if self._tx_tasks:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*self._tx_tasks, return_exceptions=True), timeout=5.0)
+            except asyncio.TimeoutError:
+                pass
         # 외부 listener 리소스(예: RelayClient) 정리 — end 송신 + 소켓 close
         if self._relay is not None:
             try:
@@ -358,7 +366,9 @@ class MeetingSession:
             first = False
             self._emit("source", text)
             entry = self._record_line(text)
-            asyncio.create_task(self._translate_bg(text, entry))
+            t = asyncio.create_task(self._translate_bg(text, entry))
+            self._tx_tasks.add(t)
+            t.add_done_callback(self._tx_tasks.discard)
 
     async def _translate_bg(self, text: str, entry: dict | None = None):
         """양방향 번역. 시스템 프롬프트에 워드북/맥락/few-shot 이 다 들어있고
