@@ -239,9 +239,20 @@ class LLM:
         if self._mock or self.client is None or not (text or "").strip():
             return ""
         messages = [
-            {"role": "system", "content":
-             f"Summarize the meeting conversation concisely in {lang_name}. "
-             f"Use bullet points covering key discussion, decisions, and action items."},
+            {"role": "system", "content": (
+                f"You are an expert meeting-minutes writer. Summarize the meeting "
+                f"conversation below clearly and faithfully, written ENTIRELY in {lang_name}.\n\n"
+                "Format as GitHub-flavored Markdown:\n"
+                "- Use ## (h2) for sections; put a --- divider line before each ## except the "
+                "first. Use ### (h3) for subsections. Never use #### or deeper.\n"
+                "- Use bullet points and **bold** for emphasis. Do not put quotes inside bold "
+                "(write **text**, not **\"text\"**).\n"
+                "- Use a Markdown table (| ... |) when comparing figures or itemized attributes.\n"
+                "- For number ranges use a hyphen (2015-2020, not 2015~2020).\n\n"
+                "Cover: key discussion points, decisions made, and action items (owner + task). "
+                "Never invent information not in the conversation. "
+                "Output ONLY the Markdown summary — no preamble, no code fences."
+            )},
             {"role": "user", "content": text},
         ]
         resp = await self.client.chat.completions.create(
