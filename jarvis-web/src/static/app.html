@@ -366,10 +366,7 @@
     const user = meta.user || "?";
     meetingTitle = meta.partner ? `${meta.partner} ↔ ${user}` : "Meeting";
     if (document.body.dataset.view === "meeting") $("title").textContent = meetingTitle;
-    const tags = [];
-    if (meta.partner_lang) tags.push(`${meta.partner}: ${meta.partner_lang}`);
-    if (meta.user_lang) tags.push(`${user}: ${meta.user_lang}`);
-    $("meta-badge").textContent = tags.join(" · ");
+    // 언어 badge 는 meeting_info 이벤트가 채운다(회의별 룸 언어).
   }
   function newCard() {
     const card = document.createElement("section");
@@ -419,6 +416,8 @@
           btn.addEventListener("click", () => { navigator.clipboard?.writeText(share); });
           el.appendChild(btn);
           el.classList.remove("hidden");
+          const langs = Array.isArray(info.languages) ? info.languages : [];
+          $("meta-badge").textContent = langs.join(" · ");
         } catch {}
         return;
       }
