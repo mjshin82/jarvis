@@ -56,13 +56,22 @@
   #gate-pw { font-size: 16px; padding: 10px; border: 1px solid #888; border-radius: 8px; }
   #gate-go { font-size: 15px; padding: 10px; border-radius: 8px; cursor: pointer; }
   #gate-err { color: #c00; font-size: 13px; min-height: 16px; }
-  #summary { padding: 14px 16px; border-bottom: 2px solid var(--border); background: var(--bg); }
+  #summary { max-width: 980px; margin: 0 auto; width: 100%; box-sizing: border-box;
+    padding: 14px 16px; border-bottom: 2px solid var(--border); background: var(--bg); }
   #summary.hidden { display: none; }
-  #summary h3 { font-size: 15px; margin: 0 0 8px; }
-  #summary .sum { margin: 8px 0; }
-  #summary .sum-lang { font-size: 13px; color: var(--partial); margin-bottom: 2px; }
-  #summary .sum-body { white-space: pre-wrap; font-size: 14px; }
+  #summary-langs { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 10px; font-size: 13px; }
+  #summary-langs label { cursor: pointer; }
+  .md { font-size: 14px; line-height: 1.5; }
+  .md h2 { font-size: 17px; margin: 14px 0 6px; }
+  .md h3 { font-size: 15px; margin: 12px 0 6px; }
+  .md ul, .md ol { padding-left: 20px; margin: 6px 0; }
+  .md hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
+  .md table { border-collapse: collapse; margin: 8px 0; }
+  .md th, .md td { border: 1px solid var(--border); padding: 4px 8px; }
+  .md code { background: var(--card); padding: 1px 4px; border-radius: 4px; }
+  .md pre { background: var(--card); padding: 8px; border-radius: 6px; overflow-x: auto; }
 </style>
+  <!-- marked-lib -->
 </head>
 <body>
   <div id="gate">
@@ -78,7 +87,10 @@
     <div class="title" id="title">회의 자막</div>
     <div id="conn">···</div>
   </header>
-  <div id="summary" class="hidden"></div>
+  <div id="summary" class="hidden">
+    <div id="summary-langs"></div>
+    <div id="summary-body" class="md"></div>
+  </div>
   <main id="log"></main>
   <div class="lockbar" id="lockbar">↓ 새 자막 보기</div>
 <script>
@@ -111,15 +123,27 @@
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
+  let _summaries = {}, _summaryLang = "";
+  function renderSummaryBody() {
+    const md = _summaries[_summaryLang] || "";
+    $("summary-body").innerHTML = (typeof marked !== "undefined" && md) ? marked.parse(md) : escapeHtml(md);
+  }
   function renderSummaries(summaries) {
     const el = $("summary");
-    if (!summaries || !Object.keys(summaries).length) { el.classList.add("hidden"); return; }
+    _summaries = summaries || {};
+    const langs = Object.keys(_summaries);
+    if (!langs.length) { el.classList.add("hidden"); return; }
+    if (!_summaries[_summaryLang]) _summaryLang = langs[0];   // 선택 유지, 없으면 첫 언어
     const names = { ko: "🇰🇷 한국어", en: "🇺🇸 English", ja: "🇯🇵 日本語", zh: "🇨🇳 中文" };
-    let html = "<h3>📝 회의 요약</h3>";
-    for (const [lg, txt] of Object.entries(summaries)) {
-      html += `<div class="sum"><div class="sum-lang">${names[lg] || lg}</div><div class="sum-body">${escapeHtml(txt)}</div></div>`;
+    const lc = $("summary-langs");
+    lc.innerHTML = "";
+    for (const lg of langs) {
+      const label = document.createElement("label");
+      label.innerHTML = `<input type="radio" name="sumlang" value="${lg}" ${lg === _summaryLang ? "checked" : ""}> ${names[lg] || lg}`;
+      label.querySelector("input").addEventListener("change", () => { _summaryLang = lg; renderSummaryBody(); });
+      lc.appendChild(label);
     }
-    el.innerHTML = html;
+    renderSummaryBody();
     el.classList.remove("hidden");
   }
   function handle(ev) {
