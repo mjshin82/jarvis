@@ -253,3 +253,65 @@ def test_on_text_plain_speaks_then_idle():
         assert c.spans["speak"] == ["오늘 날씨"]
         assert c.mode is Mode.IDLE
     asyncio.run(run())
+
+
+def test_translate_mode_enter_exit():
+    async def run():
+        c = make_controller()
+        await c.start_translate("en")
+        assert c.mode is Mode.TRANSLATE
+        assert c.translate_mode.is_translate() is True
+        assert c.mic.tap is None
+        # 번역 모드 발화 → translate_audio 호출, 모드 유지
+        await c.on_utterance(np.zeros(4, dtype=np.float32))
+        await asyncio.sleep(0)   # 백그라운드 태스크 진입
+        assert c.mode is Mode.TRANSLATE
+        # on_wake 무시
+        await c.on_wake()
+        assert c.mode is Mode.TRANSLATE
+        await c.stop_translate()
+        assert c.mode is Mode.IDLE
+        assert c.translate_mode.is_translate() is False
+    asyncio.run(run())
+
+
+def test_meeting_enter_snapshots_and_live():
+    async def run():
+        sess = FakeSession()
+        c = make_controller(make_meeting=lambda meta: sess)
+        await c.start_meeting()
+        assert c.mode is Mode.MEETING and c.meeting_phase is MeetingPhase.LIVE
+        assert sess.started is True
+        assert c.mic.snapshots == 1            # 진입 시 소스 모드 저장
+        assert c.mic.tap == sess.feed_block    # tap = 회의 STT
+        assert ("navigate", "meeting") in c.web_pub.emits
+        assert sess in c.spans["after"]        # after_meeting_start 훅 호출
+    asyncio.run(run())
+
+
+def test_meeting_exit_restores_mic_source():
+    """회귀: 회의 종료 후 mic 모드가 입장 전으로 복원된다."""
+    async def run():
+        sess = FakeSession()
+        mic = FakeMic(); mic._mode = "remote"   # 입장 전 폰 소스
+        c = make_controller(mic=mic, make_meeting=lambda meta: sess)
+        await c.start_meeting()
+        await c.stop_meeting()
+        assert c.mode is Mode.IDLE
+        assert sess.stopped is True
+        assert mic.restored == ["remote"]       # snapshot 값으로 복원
+        assert ("navigate", "home") in c.web_pub.emits
+    asyncio.run(run())
+
+
+def test_meeting_setup_two_phase_then_input():
+    async def run():
+        setup = FakeSetup(done=False)
+        sess = FakeSession()
+        c = make_controller(make_setup=lambda: setup, make_meeting=lambda meta: sess)
+        await c.start_meeting()
+        assert c.mode is Mode.MEETING and c.meeting_phase is MeetingPhase.SETUP
+        await c.on_text("상대이름")             # setup 입력 → done → LIVE
+        assert c.meeting_phase is MeetingPhase.LIVE
+        assert sess.started is True
+    asyncio.run(run())

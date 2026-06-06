@@ -284,3 +284,80 @@ class ConversationController:
         if handled:
             return
         await self._dispatch_response_text(line, from_voice=False)
+
+    # --- TRANSLATE ---
+    async def start_translate(self, src_lang):
+        await self._teardown()
+        self.translate_mode.start_translate(src_lang)
+        self.mode = Mode.TRANSLATE
+        self.phase = None
+        self._apply_tap()
+        suffix = f" (입력 언어: {src_lang})" if src_lang else " (입력 언어 자동 감지)"
+        self.log(f"🌐 번역 모드 시작{suffix}. 끝내려면 /stop.")
+
+    async def stop_translate(self):
+        if self.mode is not Mode.TRANSLATE:
+            self.log("번역 모드가 아닙니다.")
+            return
+        await self._set_idle()
+        self.log("🌐 번역 모드 종료.")
+
+    # --- MEETING ---
+    async def start_meeting(self):
+        if self.mode is Mode.MEETING:
+            self.log("회의 모드가 이미 진행 중입니다.")
+            return
+        await self._teardown()
+        setup = self.make_setup()
+        self.mode = Mode.MEETING
+        if not setup.done:
+            self.meeting_phase = MeetingPhase.SETUP
+            self.meeting_setup = setup
+            self._apply_tap()
+            self.log(f"🎤 회의 시작 전 정보를 입력해주세요. (Esc 로 취소)")
+            self.log(f"   {setup.prompt}")
+            return
+        await self._begin_meeting(setup.meta)
+
+    async def _begin_meeting(self, meta):
+        try:
+            sess = self.make_meeting(meta)
+            await sess.start()
+        except Exception as e:
+            self.log(f"회의 모드 시작 실패: {e}")
+            await self._set_idle()
+            return
+        self.meeting_session = sess
+        self.meeting_setup = None
+        self.meeting_phase = MeetingPhase.LIVE
+        self.saved_mic_mode = self.mic.snapshot_mode()   # 종료 시 복원할 소스
+        self._apply_tap()                                # tap = sess.feed_block
+        if self.web_pub is not None:
+            self.web_pub.emit("navigate", "meeting")
+        self.after_meeting_start(sess)                   # web listener + 자막 URL 로그
+
+    async def stop_meeting(self):
+        if self.mode is not Mode.MEETING:
+            self.log("회의 모드가 아닙니다.")
+            return
+        await self._set_idle()
+        self.log("🎤 회의 모드 종료.")
+
+    async def _handle_setup_input(self, line):
+        setup = self.meeting_setup
+        if setup is None:
+            return
+        stripped = line.strip()
+        if stripped.lower() in ("/stop", "/cancel", "취소"):
+            self.meeting_setup = None
+            await self._set_idle()
+            self.log("🎤 회의 시작을 취소했어요.")
+            return
+        if not stripped:
+            self.log(f"   {setup.prompt}")
+            return
+        setup.submit(stripped)
+        if not setup.done:
+            self.log(f"   {setup.prompt}")
+            return
+        await self._begin_meeting(setup.meta)
