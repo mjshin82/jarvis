@@ -229,8 +229,9 @@ if(__exports != exports)module.exports = exports;return module.exports}));
     const tabs = $("view-tabs");
     if (!langs.length) { tabs.classList.add("hidden"); _tab = "log"; applyTab(); return; }
     if (_tab !== "log" && !_summaries[_tab]) _tab = "log";     // 선택 유지, 없으면 대화기록
-    const names = { ko: "🇰🇷 한국어", en: "🇺🇸 English", ja: "🇯🇵 日本語", zh: "🇨🇳 中文" };
-    const opts = [["log", "💬 대화기록"]].concat(langs.map((lg) => [lg, (names[lg] || lg) + " 요약"]));
+    const opts = [["log", I18N.t("tab.log")]].concat(
+      langs.map((lg) => [lg, I18N.t("lang." + lg) + I18N.t("tab.summarySuffix")])
+    );
     tabs.innerHTML = "";
     for (const [val, txt] of opts) {
       const label = document.createElement("label");
@@ -290,9 +291,9 @@ if(__exports != exports)module.exports = exports;return module.exports}));
         renderSummaries(s.summaries);
         return;
       }
-      case "end": { const c = newCard(); c.innerHTML = `<div class="info">— 회의 종료 —</div>`; $("conn").textContent = "🛑 종료됨"; $("conn").className = "bad"; break; }
-      case "kicked": { const c = newCard(); c.innerHTML = `<div class="info">— 새 publisher 가 채널을 인수했습니다 —</div>`; break; }
-      case "publisher_disconnected": { $("conn").textContent = "⏸ 연결 끊김"; $("conn").className = "bad"; return; }
+      case "end": { const c = newCard(); c.innerHTML = `<div class="info">${escapeHtml(I18N.t("card.meetingEnded"))}</div>`; $("conn").textContent = I18N.t("conn.ended"); $("conn").className = "bad"; break; }
+      case "kicked": { const c = newCard(); c.innerHTML = `<div class="info">${escapeHtml(I18N.t("card.taken"))}</div>`; break; }
+      case "publisher_disconnected": { $("conn").textContent = I18N.t("conn.disconnected"); $("conn").className = "bad"; return; }
       default: return;
     }
     scrollIfLocked();
@@ -303,7 +304,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
     const base = `${proto}//${location.host}/watch/${encodeURIComponent(key)}`;
     ws = new WebSocket(adminPw ? `${base}?token=${encodeURIComponent(adminPw)}` : base);
     ws.addEventListener("open", () => {
-      $("conn").textContent = "● live"; $("conn").className = "ok"; reconnectDelay = 500;
+      $("conn").textContent = I18N.t("conn.live"); $("conn").className = "ok"; reconnectDelay = 500;
       ws.send(JSON.stringify({ kind: "auth", mid, pw }));
     });
     ws.addEventListener("message", (m) => { try { handle(JSON.parse(m.data)); } catch (e) {} });
@@ -311,11 +312,11 @@ if(__exports != exports)module.exports = exports;return module.exports}));
       if (e.code === 4003) {
         pw = "";
         $("gate").classList.remove("hidden");
-        $("gate-err").textContent = "입장할 수 없습니다 (비번/회의 확인).";
-        $("conn").textContent = "🔒"; $("conn").className = "bad";
+        $("gate-err").textContent = I18N.t("gate.errCannotEnter");
+        $("conn").textContent = I18N.t("conn.locked"); $("conn").className = "bad";
         return;
       }
-      $("conn").textContent = `재연결 (${reconnectDelay/1000}s)…`; $("conn").className = "bad";
+      $("conn").textContent = I18N.t("conn.reconnecting", { n: reconnectDelay / 1000 }); $("conn").className = "bad";
       setTimeout(connect, reconnectDelay);
       reconnectDelay = Math.min(reconnectDelay * 2, 8000);
     });
@@ -323,7 +324,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
   }
   $("gate-go").addEventListener("click", () => {
     pw = $("gate-pw").value;
-    if (!pw) { $("gate-err").textContent = "비번을 입력하세요"; return; }
+    if (!pw) { $("gate-err").textContent = I18N.t("gate.errEmptyPw"); return; }
     $("gate-err").textContent = "";
     $("gate").classList.add("hidden");
     connect();
