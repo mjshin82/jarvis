@@ -184,6 +184,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
   const _parts = location.pathname.split("/").filter(Boolean);
   const key = decodeURIComponent(_parts[0] || "jarvis");
   const mid = decodeURIComponent(_parts[2] || "");
+  const adminPw = localStorage.getItem("jarvis_admin_pw") || "";
   const $ = (id) => document.getElementById(id);
   let lastCard = null, draftCard = null, lockedToBottom = true;
   window.addEventListener("scroll", () => {
@@ -288,7 +289,8 @@ if(__exports != exports)module.exports = exports;return module.exports}));
   let ws = null, reconnectDelay = 500, pw = "";
   function connect() {
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
-    ws = new WebSocket(`${proto}//${location.host}/watch/${encodeURIComponent(key)}`);
+    const base = `${proto}//${location.host}/watch/${encodeURIComponent(key)}`;
+    ws = new WebSocket(adminPw ? `${base}?token=${encodeURIComponent(adminPw)}` : base);
     ws.addEventListener("open", () => {
       $("conn").textContent = "● live"; $("conn").className = "ok"; reconnectDelay = 500;
       ws.send(JSON.stringify({ kind: "auth", mid, pw }));
@@ -316,6 +318,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
     connect();
   });
   $("gate-pw").addEventListener("keydown", (e) => { if (e.key === "Enter") $("gate-go").click(); });
+  if (adminPw) { $("gate").classList.add("hidden"); connect(); }
 })();
 </script>
 </body>
