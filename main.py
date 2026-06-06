@@ -20,6 +20,7 @@ LLM 으로 흘러간다(STT 만 건너뛰고 이후 파이프라인은 동일). 
 utterance 가 돼도 무시되고, 오직 진짜 호출어/텍스트 입력만 상태를 전환한다.
 """
 import asyncio
+import os
 
 import numpy as np
 
@@ -376,6 +377,12 @@ async def main():
             if exc:
                 raise exc
     finally:
+        # 종료가 어디서 멈춰도 보장: 데몬 워치독이 일정 시간 뒤 강제 종료
+        # (RealtimeSTT/sounddevice 의 비데몬 스레드·서브프로세스 잔존 또는 close 블로킹 대비).
+        import threading
+        _wd = threading.Timer(5.0, lambda: os._exit(0))
+        _wd.daemon = True
+        _wd.start()
         # console 을 먼저 멈춰야 collector 가 await 중인 prompt_async 가 풀린다.
         await console.stop()
         await cancel(audio_task)
@@ -418,3 +425,6 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         print("\n👋 종료")
+    finally:
+        # 정리가 끝났어도 잔존 스레드/프로세스가 인터프리터 종료를 막는 경우가 있어 강제 종료.
+        os._exit(0)
