@@ -38,7 +38,7 @@ def test_summarize_calls_client():
     llm.client = FakeClient()
     llm.model = "m"
     llm.extra = {}
-    out = asyncio.run(llm.summarize("회의 원문"))
+    out = asyncio.run(llm.summarize("회의 원문", "Japanese"))
     assert out == "요약본"
-    assert captured["model"] == "m"
+    assert "Japanese" in captured["messages"][0]["content"]
     assert "회의 원문" in captured["messages"][-1]["content"]
