@@ -37,7 +37,7 @@ from audio_io import Microphone
 from audio_backend import make_backend
 from stt import STT
 from llm import LLM
-from meeting_store import MeetingStore
+from meeting_store import MeetingStore, archive_response
 from live_translate import hash_password
 from tts import TTS
 from player import Player
@@ -352,6 +352,20 @@ async def main():
 
     store = MeetingStore("meetings.db")
 
+    def _serve_archive(msg):
+        """DO → archive_request: SQLite 조회·검증 후 archive_response 회신."""
+        try:
+            data = json.loads(msg.get("text") or "{}")
+        except Exception:
+            return
+        payload = archive_response(store.get(data.get("mid") or ""),
+                                   data.get("pw") or "", data.get("req"))
+        if web_pub is not None:
+            web_pub.emit("archive_response", json.dumps(payload, ensure_ascii=False))
+
+    if web_pub is not None:
+        web_pub.on_archive_request = _serve_archive
+
     def _save_meeting(record):
         """종료 시 즉시 저장 → 트랜스크립트 있으면 백그라운드 요약 후 갱신."""
         async def _run():
@@ -384,6 +398,9 @@ async def main():
                         store.set_summary, record["id"],
                         json.dumps(summaries, ensure_ascii=False))
                     console.log(f"📝 회의 요약 저장됨 (ID {record['id']}, {','.join(summaries)})")
+                    if web_pub is not None:
+                        web_pub.emit("meeting_summary", json.dumps(
+                            {"mid": record["id"], "summaries": summaries}, ensure_ascii=False))
                 except Exception as e:
                     console.log(f"요약 저장 실패: {e}")
         asyncio.create_task(_run())
