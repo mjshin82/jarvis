@@ -46,9 +46,25 @@
     font-size: 13px; cursor: pointer; opacity: 0; pointer-events: none; transition: opacity .2s; }
   .lockbar.show { opacity: 1; pointer-events: auto; }
   @media (max-width: 600px) { .src { font-size: 17px; } .tx { font-size: 16px; } }
+  #gate { position: fixed; inset: 0; background: var(--bg, #ffffff); display: flex;
+    align-items: center; justify-content: center; z-index: 100; }
+  #gate.hidden { display: none; }
+  .gate-box { display: flex; flex-direction: column; gap: 10px; width: min(86vw, 300px); }
+  .gate-title { font-size: 16px; font-weight: 600; }
+  #gate-pw { font-size: 16px; padding: 10px; border: 1px solid #888; border-radius: 8px; }
+  #gate-go { font-size: 15px; padding: 10px; border-radius: 8px; cursor: pointer; }
+  #gate-err { color: #c00; font-size: 13px; min-height: 16px; }
 </style>
 </head>
 <body>
+  <div id="gate">
+    <div class="gate-box">
+      <div class="gate-title">🔒 회의 자막 입장</div>
+      <input id="gate-pw" type="password" placeholder="비번" />
+      <button id="gate-go">입장</button>
+      <div id="gate-err"></div>
+    </div>
+  </div>
   <header>
     <img class="app-icon" src="/icon.png" alt="" />
     <div class="title" id="title">회의 자막</div>
@@ -58,7 +74,9 @@
   <div class="lockbar" id="lockbar">↓ 새 자막 보기</div>
 <script>
 (() => {
-  const key = decodeURIComponent(location.pathname.replace(/^\//, "").replace(/\/.*$/, "")) || "jarvis";
+  const _parts = location.pathname.split("/").filter(Boolean);
+  const key = decodeURIComponent(_parts[0] || "jarvis");
+  const mid = decodeURIComponent(_parts[2] || "");
   const $ = (id) => document.getElementById(id);
   let lastCard = null, draftCard = null, lockedToBottom = true;
   window.addEventListener("scroll", () => {
@@ -116,20 +134,37 @@
     }
     scrollIfLocked();
   }
-  let ws = null, reconnectDelay = 500;
+  let ws = null, reconnectDelay = 500, pw = "";
   function connect() {
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
     ws = new WebSocket(`${proto}//${location.host}/watch/${encodeURIComponent(key)}`);
-    ws.addEventListener("open", () => { $("conn").textContent = "● live"; $("conn").className = "ok"; reconnectDelay = 500; });
+    ws.addEventListener("open", () => {
+      $("conn").textContent = "● live"; $("conn").className = "ok"; reconnectDelay = 500;
+      ws.send(JSON.stringify({ kind: "auth", mid, pw }));
+    });
     ws.addEventListener("message", (m) => { try { handle(JSON.parse(m.data)); } catch (e) {} });
-    ws.addEventListener("close", () => {
+    ws.addEventListener("close", (e) => {
+      if (e.code === 4003) {
+        pw = "";
+        $("gate").classList.remove("hidden");
+        $("gate-err").textContent = "입장할 수 없습니다 (비번/회의 확인).";
+        $("conn").textContent = "🔒"; $("conn").className = "bad";
+        return;
+      }
       $("conn").textContent = `재연결 (${reconnectDelay/1000}s)…`; $("conn").className = "bad";
       setTimeout(connect, reconnectDelay);
       reconnectDelay = Math.min(reconnectDelay * 2, 8000);
     });
     ws.addEventListener("error", () => { try { ws.close(); } catch {} });
   }
-  connect();
+  $("gate-go").addEventListener("click", () => {
+    pw = $("gate-pw").value;
+    if (!pw) { $("gate-err").textContent = "비번을 입력하세요"; return; }
+    $("gate-err").textContent = "";
+    $("gate").classList.add("hidden");
+    connect();
+  });
+  $("gate-pw").addEventListener("keydown", (e) => { if (e.key === "Enter") $("gate-go").click(); });
 })();
 </script>
 </body>
