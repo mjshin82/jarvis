@@ -87,3 +87,43 @@ def test_meta_has_new_fields():
     from live_translate import MeetingMeta
     m = MeetingMeta(my_name="민준", title="주간", password="pw")
     assert m.meeting_id == "" and m.started_at == "" and m.password == "pw"
+
+
+def test_finalize_meta_assigns_ids():
+    from live_translate import MeetingMeta
+    sess = _sess(meta=MeetingMeta(title="주간"))
+    sess._finalize_meta()
+    assert len(sess.meta.meeting_id) == 6
+    assert len(sess.meta.password) == 6        # 빈 입력 → 자동 생성
+    assert sess.meta.started_at != ""
+
+
+def test_finalize_meta_keeps_given_password():
+    from live_translate import MeetingMeta
+    sess = _sess(meta=MeetingMeta(password="given"))
+    sess._finalize_meta()
+    assert sess.meta.password == "given"
+
+
+def test_record_line_and_translation():
+    sess = _sess()
+    entry = sess._record_line("hello")
+    assert entry["source"] == "hello" and entry["ko"] == "" and entry["en"] == ""
+    assert sess._transcript == [entry]
+    entry["ko"] = "안녕"
+    assert sess._transcript[0]["ko"] == "안녕"
+
+
+def test_record_shape():
+    from live_translate import MeetingMeta, hash_password
+    sess = _sess(meta=MeetingMeta(title="주간", password="pw"))
+    sess.meta.meeting_id = "abc123"
+    sess.meta.started_at = "2026-06-06T10:00:00"
+    sess._record_line("hi")
+    rec = sess.record()
+    assert rec["id"] == "abc123"
+    assert rec["password_hash"] == hash_password("pw")
+    assert rec["title"] == "주간"
+    assert rec["started_at"] == "2026-06-06T10:00:00"
+    assert rec["ended_at"] != ""
+    assert rec["transcript"][0]["source"] == "hi"

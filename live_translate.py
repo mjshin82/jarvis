@@ -147,6 +147,7 @@ class MeetingSession:
         self._tx_model = ""
         self._tx_system = ""
         self._tx_label = ""   # 화면 안내용
+        self._transcript: list[dict] = []    # [{ts, source, ko, en}] — 회의 기록
 
     def add_listener(self, callback) -> None:
         """매 _emit 호출 시 callback(kind, text) 가 함께 불린다.
@@ -187,6 +188,31 @@ class MeetingSession:
             self._tx_model = self.llm.model
             self._tx_label = f"local ({self._tx_model})"
 
+    def _finalize_meta(self) -> None:
+        """회의 시작 시 메타 확정 — id 발급, 비번 미입력 시 자동 생성, 시작 시각 기록."""
+        if not self.meta.meeting_id:
+            self.meta.meeting_id = new_meeting_id()
+        if not self.meta.password:
+            self.meta.password = gen_password()
+        self.meta.started_at = now_iso()
+
+    def _record_line(self, source: str) -> dict:
+        """확정 원문 1줄을 트랜스크립트에 추가하고 entry 반환(번역은 나중에 채움)."""
+        entry = {"ts": now_iso(), "source": source, "ko": "", "en": ""}
+        self._transcript.append(entry)
+        return entry
+
+    def record(self) -> dict:
+        """종료 시 저장할 회의 기록. (stop() 후 호출)"""
+        return {
+            "id": self.meta.meeting_id,
+            "password_hash": hash_password(self.meta.password),
+            "title": self.meta.title or "회의",
+            "started_at": self.meta.started_at,
+            "ended_at": now_iso(),
+            "transcript": list(self._transcript),
+        }
+
     def feed_block(self, block) -> None:
         """MicRouter tap 이 매 블록 호출 — float32 → int16 PCM 으로 활성 STT 백엔드 주입."""
         if self._stt is None and self._rt is None:
@@ -198,6 +224,8 @@ class MeetingSession:
             self._rt.feed_pcm16(pcm16)
 
     async def start(self) -> None:
+        self._finalize_meta()
+        self._transcript = []
         self._loop = asyncio.get_running_loop()
         self._final_q = asyncio.Queue()
 
@@ -231,7 +259,7 @@ class MeetingSession:
         # 번역기 + final 소비자는 두 백엔드 공통
         self._setup_translator()
         self._consumer_task = asyncio.create_task(self._consume_finals())
-        self.log(f"🎤 회의 시작: {self.meta.title or '회의'}")
+        self.log(f"🎤 회의 시작: {self.meta.title or '회의'} (ID {self.meta.meeting_id})")
         self.log(f"🎤 회의 모드 시작 (번역: {self._tx_label}). 끝내려면 /stop.")
 
     async def stop(self) -> None:
@@ -329,9 +357,10 @@ class MeetingSession:
                 self._emit("gap", "")
             first = False
             self._emit("source", text)
-            asyncio.create_task(self._translate_bg(text))
+            entry = self._record_line(text)
+            asyncio.create_task(self._translate_bg(text, entry))
 
-    async def _translate_bg(self, text: str):
+    async def _translate_bg(self, text: str, entry: dict | None = None):
         """양방향 번역. 시스템 프롬프트에 워드북/맥락/few-shot 이 다 들어있고
         매 호출마다 *정확히 동일* 하게 보내므로 DeepSeek prompt caching 히트."""
         # local 폴백이면 ollama keep_alive 가 필요, remote 는 빈 dict
@@ -345,4 +374,6 @@ class MeetingSession:
             return
         if out:
             kind = "translation_en" if coach.is_korean(text) else "translation_ko"
+            if entry is not None:
+                entry["en" if kind == "translation_en" else "ko"] = out
             self._emit(kind, out)
