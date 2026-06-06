@@ -19,7 +19,7 @@ _BASE = "https://api.gladia.io"
 class GladiaSTT:
     def __init__(self, api_key, *, model="solaria-1", languages=("ko", "en"),
                  on_partial, on_final, on_log=print, connect_timeout=5.0,
-                 vocabulary=(), endpointing=0.8, max_duration=15.0):
+                 vocabulary=(), endpointing=0.25, max_duration=5.0):
         self.api_key = api_key
         self.model = model or "solaria-1"
         self.languages = list(languages) or ["ko", "en"]

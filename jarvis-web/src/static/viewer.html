@@ -59,11 +59,16 @@
   #summary { max-width: 980px; margin: 0 auto; width: 100%; box-sizing: border-box;
     padding: 14px 16px; border-bottom: 2px solid var(--border); background: var(--bg); }
   #summary.hidden { display: none; }
-  #summary-langs { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 10px; font-size: 13px; }
-  #summary-langs label { cursor: pointer; }
-  .md { font-size: 14px; line-height: 1.5; }
-  .md h2 { font-size: 17px; margin: 14px 0 6px; }
-  .md h3 { font-size: 15px; margin: 12px 0 6px; }
+  #summary-langs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  #summary-langs label { cursor: pointer; user-select: none; font-size: 14px; padding: 5px 14px;
+    border: 1px solid var(--border); border-radius: 999px; background: var(--bg); }
+  #summary-langs input { position: absolute; opacity: 0; width: 0; height: 0; }
+  #summary-langs label:has(input:checked) { background: var(--accent); color: #fff; border-color: var(--accent); }
+  #summary-body { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+  .md { font-size: 15px; line-height: 1.55; }
+  .md h2 { font-size: 18px; margin: 14px 0 6px; }
+  .md h3 { font-size: 16px; margin: 12px 0 6px; }
+  .md :first-child { margin-top: 0; }
   .md ul, .md ol { padding-left: 20px; margin: 6px 0; }
   .md hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
   .md table { border-collapse: collapse; margin: 8px 0; }
