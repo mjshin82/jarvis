@@ -141,6 +141,12 @@
   #mode-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
   @keyframes viewfade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
   #voice-toggle:disabled { opacity: 0.45; cursor: not-allowed; animation: none; }
+  /* jarvis 다운 시 모든 액션 버튼 비활성(로그인 제외) */
+  body.server-down #voice-toggle,
+  body.server-down #dock-plus,
+  body.server-down #mic-src-toggle,
+  body.server-down #meeting-stop,
+  body.server-down #plus-menu button { opacity: 0.45; pointer-events: none; cursor: not-allowed; animation: none; }
   .hidden { display: none !important; }
 </style>
 </head>
@@ -681,13 +687,16 @@
   let serverUp = true;
   function setServerUp(up) {
     serverUp = up;
-    $("voice-toggle").disabled = !up;
+    document.body.classList.toggle("server-down", !up);   // CSS 가 모든 액션 버튼 비활성
     if (up) {
       $("conn").textContent = "● live";
       $("conn").classList.remove("bad"); $("conn").classList.add("ok");
     } else {
       $("conn").textContent = "⚠ 서버 꺼짐";
       $("conn").classList.remove("ok"); $("conn").classList.add("bad");
+      $("plus-menu").classList.add("hidden");        // 열린 메뉴/설정/로딩 닫기
+      $("settings-modal").classList.add("hidden");
+      hideMeetingLoading();
       if (voiceOn) { voiceOn = false; $("voice-toggle").classList.remove("active"); mic.apply(); }
     }
   }
