@@ -110,17 +110,10 @@ export class MeetingDO {
       this.publisher = null;
       return;
     }
-    // partial: 직전이 partial 이면 덮어쓰기, 아니면 append
+    // partial: 조합중 임시 텍스트 — replay 버퍼에 넣지 않는다(재접속 시 미완성 partial 이
+    // navigate 전에 replay 돼 홈 채팅 draft 로 누수되던 버그 방지). 라이브만 broadcast.
     if (msg.kind === "partial") {
-      const last = this.events[this.events.length - 1];
-      if (last && last.kind === "partial") {
-        // 덮어쓰기 — seq 도 새로 부여(클라이언트가 "갱신"으로 인식)
-        const replaced = this.buildEvent(msg);
-        this.events[this.events.length - 1] = replaced;
-        this.broadcast(replaced);
-      } else {
-        this.append(this.buildEvent(msg));
-      }
+      this.broadcast(this.buildEvent(msg));
       return;
     }
     // navigate: 일시적 명령(상태 아님) — 현재 viewer 에게만 broadcast, replay 버퍼 미적재.

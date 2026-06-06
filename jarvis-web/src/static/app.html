@@ -270,6 +270,9 @@
     const nv = (v === "meeting" ? "meeting" : "home");
     if (document.body.dataset.view === nv) return;
     setView(nv);   // URL 은 /{name} 유지 — /meeting 은 공개 뷰어
+    // 직전 뷰의 조합중(draft) 잔재 제거 — 모드 간 partial 누수 방지
+    if (chatDraft) { chatDraft.remove(); chatDraft = null; }
+    if (draftCard) { draftCard.remove(); draftCard = null; }
     const el = nv === "meeting" ? $("meeting-view") : $("home-view");
     el.style.animation = "none"; void el.offsetWidth; el.style.animation = "viewfade .25s ease";
     showModeToast(nv === "meeting" ? "🎤 회의 모드" : "💬 일반 모드");
