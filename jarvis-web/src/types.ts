@@ -17,6 +17,8 @@ export type EventKind =
   | "mic_source"           // jarvis 가 듣는 소스 상태 (system|remote)
   | "mic_release"          // jarvis → owner: 무발화 타임아웃, 웹 마이크 해제 신호
   | "meeting_title"        // jarvis → owner: 회의 제목(헤더 표시)
+  | "meeting_creds"        // jarvis → DO: 현재 회의 인증(미broadcast). text=JSON{meeting_id,password_hash}
+  | "meeting_info"         // jarvis → owner: 공유용 링크/비번. text=JSON{meeting_id,password}
   | "user"
   | "assistant"
   | "navigate"

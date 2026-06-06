@@ -333,7 +333,9 @@ def test_meeting_setup_empty_accepts_defaults():
         assert c.meeting_phase is MeetingPhase.SETUP
         await c.on_text("")                      # title 단계 Enter=기본
         assert c.meeting_phase is MeetingPhase.SETUP   # 아직 vocabulary 단계
-        await c.on_text("")                      # vocabulary 단계 Enter=기본 → 시작
+        await c.on_text("")                      # vocabulary 단계 Enter=기본
+        assert c.meeting_phase is MeetingPhase.SETUP   # 아직 password 단계
+        await c.on_text("")                      # password 단계 Enter=자동생성 → 시작
         assert c.meeting_phase is MeetingPhase.LIVE
         assert sess.started is True
         assert setup.meta.title == "회의"

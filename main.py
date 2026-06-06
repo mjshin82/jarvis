@@ -37,6 +37,7 @@ from audio_backend import make_backend
 from stt import STT
 from llm import LLM
 from meeting_store import MeetingStore
+from live_translate import hash_password
 from tts import TTS
 from player import Player
 from wake import WakeWord
@@ -110,8 +111,9 @@ async def main():
                          if isinstance(v, str) and v.strip()]
                 if not vocab:
                     vocab = ["Jarvis", config.USER_NAME]
+                password = (msg.get("password") or "").strip()
                 await controller.start_meeting(meta=MeetingMeta(
-                    my_name=config.USER_NAME, title=title, vocabulary=vocab))
+                    my_name=config.USER_NAME, title=title, vocabulary=vocab, password=password))
             elif kind == "mic_system":
                 mic.router.set_override("local")
             elif kind == "mic_phone":
@@ -316,6 +318,15 @@ async def main():
             console.log(f"🔑 회의 ID: {sess.meta.meeting_id}")
             console.log(f"🌐 자막: {view_base}/{sess.meta.key}/meeting/{sess.meta.meeting_id}")
             web_pub.emit("meeting_title", sess.meta.title)
+            web_pub.emit("meeting_creds", json.dumps({
+                "meeting_id": sess.meta.meeting_id,
+                "password_hash": hash_password(sess.meta.password),
+            }))
+            web_pub.emit("meeting_info", json.dumps({
+                "meeting_id": sess.meta.meeting_id,
+                "password": sess.meta.password,
+            }))
+            console.log(f"🔒 비번: {sess.meta.password}")
 
     def _make_meeting(meta):
         from live_translate import MeetingSession

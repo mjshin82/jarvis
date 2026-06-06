@@ -21,6 +21,11 @@ const PUBLIC_KINDS = new Set([
   "gap", "info", "end", "kicked", "publisher_disconnected",
 ]);
 
+async function sha256hex(s: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 export class MeetingDO {
   private state: DurableObjectState;
   private publisher: WebSocket | null = null;
@@ -34,6 +39,9 @@ export class MeetingDO {
   private lastMicSource: string | null = null;
   private currentView: string | null = null;
   private lastMeetingTitle: string | null = null;
+  private currentMeetingId: string | null = null;
+  private currentPasswordHash: string | null = null;
+  private lastMeetingInfo: string | null = null;
   private events: RelayEvent[] = [];   // 최근 N개 (deque)
   private seq = 0;
   private meta: MeetingMeta | null = null;
@@ -65,7 +73,7 @@ export class MeetingDO {
     } else if (role === "subscribe") {
       this.attachViewer(server, "owner");
     } else if (role === "watch") {
-      this.attachViewer(server, "public");
+      this.attachWatchPending(server);
     } else if (role === "mic") {
       this.attachMicSender(server);
     } else if (role === "mic-recv") {
@@ -106,7 +114,12 @@ export class MeetingDO {
     }
     // end: 명시적 종료. publisher 측에서 직접 close 도 함.
     if (msg.kind === "end") {
+      this.currentMeetingId = null;
+      this.currentPasswordHash = null;
+      this.lastMeetingInfo = null;
+      this.lastMeetingTitle = null;
       this.broadcast(this.buildEvent(msg));
+      this.evictPublicViewers();   // 회의 종료 — 공개 viewer 는 다음 회의 비번 재인증 필요
       try { this.publisher?.close(1000, "end"); } catch { /* */ }
       this.publisher = null;
       return;
@@ -121,13 +134,32 @@ export class MeetingDO {
     // (append 하면 이후 접속한 viewer 가 replay 로 받아 회의가 아닐 때도 /meeting 으로 이동함)
     if (msg.kind === "navigate") {
       this.currentView = msg.text ?? null;
-      if (msg.text !== "meeting") this.lastMeetingTitle = null;   // 회의 종료 시 제목 초기화
+      if (msg.text !== "meeting") {
+        this.lastMeetingTitle = null;
+        this.currentMeetingId = null;
+        this.currentPasswordHash = null;
+        this.lastMeetingInfo = null;
+        this.evictPublicViewers();   // 회의 종료 — 공개 viewer 강제 해제(다음 회의 재인증)
+      }
       this.broadcast(this.buildEvent(msg));
       return;
     }
     if (msg.kind === "meeting_title") {
       this.lastMeetingTitle = msg.text ?? null;
       this.broadcast(this.buildEvent(msg));
+      return;
+    }
+    if (msg.kind === "meeting_creds") {
+      try {
+        const c = JSON.parse(msg.text || "{}");
+        this.currentMeetingId = c.meeting_id ?? null;
+        this.currentPasswordHash = c.password_hash ?? null;
+      } catch { /* */ }
+      return;   // DO 전용 — broadcast/append 안 함
+    }
+    if (msg.kind === "meeting_info") {
+      this.lastMeetingInfo = msg.text ?? null;
+      this.broadcast(this.buildEvent(msg));   // 공개는 PUBLIC_KINDS 필터로 차단 → owner 만
       return;
     }
     // mic_release: 일시 신호(상태 아님) — owner 에게만 broadcast, replay 미적재.
@@ -140,6 +172,38 @@ export class MeetingDO {
   }
 
   // --- viewer ---
+
+  // 회의 종료 시 공개 viewer 전원 해제 — 다음 회의(같은 방/DO)를 비번 없이 보지 못하게.
+  // 4003 으로 닫으면 viewer.html 이 비번 입력 게이트를 다시 띄운다.
+  private evictPublicViewers(): void {
+    for (const [ws, role] of this.viewers) {
+      if (role === "public") {
+        try { ws.close(4003, "meeting-ended"); } catch { /* */ }
+      }
+    }
+  }
+
+  // 공개 자막 소켓: 즉시 붙이지 않고 첫 메시지 {kind:"auth",mid,pw} 검증 후 합류.
+  private attachWatchPending(ws: WebSocket): void {
+    let authed = false;
+    const timer = setTimeout(() => {
+      if (!authed) { try { ws.close(4003, "no-auth"); } catch { /* */ } }
+    }, 10000);
+    ws.addEventListener("message", async (evt) => {
+      if (authed) return;
+      let msg: any;
+      try { msg = JSON.parse(typeof evt.data === "string" ? evt.data : ""); } catch { return; }
+      if (!msg || msg.kind !== "auth") return;
+      if (!this.currentMeetingId) { try { ws.close(4003, "no-meeting"); } catch { /* */ } return; }
+      if (msg.mid !== this.currentMeetingId) { try { ws.close(4003, "bad-meeting"); } catch { /* */ } return; }
+      const h = await sha256hex(String(msg.pw || ""));
+      if (h !== this.currentPasswordHash) { try { ws.close(4003, "bad-password"); } catch { /* */ } return; }
+      authed = true;
+      clearTimeout(timer);
+      this.attachViewer(ws, "public");
+    });
+    ws.addEventListener("close", () => clearTimeout(timer));
+  }
 
   // owner 뷰어 수를 publisher(jarvis)에게 통지 → TTS 웹/로컬 라우팅 결정에 사용
   private notifyViewerCount(): void {
@@ -165,6 +229,9 @@ export class MeetingDO {
       }
       if (this.lastMeetingTitle) {
         this.safeSend(ws, this.buildEvent({ kind: "meeting_title", text: this.lastMeetingTitle }));
+      }
+      if (this.lastMeetingInfo) {
+        this.safeSend(ws, this.buildEvent({ kind: "meeting_info", text: this.lastMeetingInfo }));
       }
       if (!this.publisher) {
         this.safeSend(ws, this.buildEvent({ kind: "publisher_disconnected" }));

@@ -75,6 +75,7 @@ def hash_password(pw: str) -> str:
 _META_STEPS = (
     ("title", "회의 제목을 입력하세요 (Enter=기본)"),
     ("vocabulary", "워드북 — 쉼표로 구분 (Enter=기본: Jarvis, 이름)"),
+    ("password", "비번 (Enter=자동 생성)"),
 )
 
 
@@ -106,6 +107,8 @@ class MeetingSetup:
             if v:
                 self.meta.vocabulary = [w.strip() for w in v.split(",") if w.strip()]
             # 빈 입력이면 기본 vocab 유지
+        elif key == "password":
+            self.meta.password = v    # 빈 값이면 세션 시작 시 자동 생성
         self.step_index += 1
 
 

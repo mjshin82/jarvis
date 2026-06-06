@@ -91,6 +91,12 @@ app.get("/:name/meeting", (c) => {
   });
 });
 
+app.get("/:name/meeting/:mid", (c) => {
+  return new Response(VIEWER_HTML, {
+    headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
+  });
+});
+
 app.get("/:name", (c) => {
   return new Response(APP_HTML, {
     headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
