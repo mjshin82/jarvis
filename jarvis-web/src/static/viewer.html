@@ -56,6 +56,12 @@
   #gate-pw { font-size: 16px; padding: 10px; border: 1px solid #888; border-radius: 8px; }
   #gate-go { font-size: 15px; padding: 10px; border-radius: 8px; cursor: pointer; }
   #gate-err { color: #c00; font-size: 13px; min-height: 16px; }
+  #summary { padding: 14px 16px; border-bottom: 2px solid var(--border); background: var(--bg); }
+  #summary.hidden { display: none; }
+  #summary h3 { font-size: 15px; margin: 0 0 8px; }
+  #summary .sum { margin: 8px 0; }
+  #summary .sum-lang { font-size: 13px; color: var(--partial); margin-bottom: 2px; }
+  #summary .sum-body { white-space: pre-wrap; font-size: 14px; }
 </style>
 </head>
 <body>
@@ -72,6 +78,7 @@
     <div class="title" id="title">회의 자막</div>
     <div id="conn">···</div>
   </header>
+  <div id="summary" class="hidden"></div>
   <main id="log"></main>
   <div class="lockbar" id="lockbar">↓ 새 자막 보기</div>
 <script>
@@ -104,6 +111,17 @@
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
+  function renderSummaries(summaries) {
+    const el = $("summary");
+    if (!summaries || !Object.keys(summaries).length) { el.classList.add("hidden"); return; }
+    const names = { ko: "🇰🇷 한국어", en: "🇺🇸 English", ja: "🇯🇵 日本語", zh: "🇨🇳 中文" };
+    let html = "<h3>📝 회의 요약</h3>";
+    for (const [lg, txt] of Object.entries(summaries)) {
+      html += `<div class="sum"><div class="sum-lang">${names[lg] || lg}</div><div class="sum-body">${escapeHtml(txt)}</div></div>`;
+    }
+    el.innerHTML = html;
+    el.classList.remove("hidden");
+  }
   function handle(ev) {
     switch (ev.kind) {
       case "hello": applyMeta(ev.meta); return;
@@ -128,6 +146,28 @@
         scrollIfLocked(); return;
       }
       case "gap": lastCard = null; if (draftCard) { draftCard.remove(); draftCard = null; } return;
+      case "meeting_archive": {
+        let a; try { a = JSON.parse(ev.text || "{}"); } catch { return; }
+        if (a.title) $("title").textContent = a.title;
+        if ($("log").childElementCount === 0 && Array.isArray(a.transcript)) {
+          const fl = { ko: "🇰🇷", en: "🇺🇸", ja: "🇯🇵", zh: "🇨🇳" };
+          for (const e of a.transcript) {
+            const c = newCard();
+            let html = `<div class="src">🧑 ${escapeHtml(e.source || "")}</div>`;
+            for (const [lg, t] of Object.entries(e.translations || {})) {
+              html += `<div class="tx ${lg}">${fl[lg] || "🌐"} ${escapeHtml(t)}</div>`;
+            }
+            c.innerHTML = html;
+          }
+        }
+        renderSummaries(a.summaries);
+        return;
+      }
+      case "meeting_summary": {
+        let s; try { s = JSON.parse(ev.text || "{}"); } catch { return; }
+        renderSummaries(s.summaries);
+        return;
+      }
       case "end": { const c = newCard(); c.innerHTML = `<div class="info">— 회의 종료 —</div>`; $("conn").textContent = "🛑 종료됨"; $("conn").className = "bad"; break; }
       case "kicked": { const c = newCard(); c.innerHTML = `<div class="info">— 새 publisher 가 채널을 인수했습니다 —</div>`; break; }
       case "publisher_disconnected": { $("conn").textContent = "⏸ 연결 끊김"; $("conn").className = "bad"; return; }
