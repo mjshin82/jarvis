@@ -111,3 +111,16 @@ def test_handle_inbound_list_request_calls_callback():
 def test_handle_inbound_list_request_no_callback_safe():
     rc = _rc()
     rc._handle_inbound(json.dumps({"kind": "list_request", "text": "{}"}))  # on_list_request=None → no crash
+
+
+def test_handle_inbound_delete_request_calls_callback():
+    rc = _rc()
+    got = []
+    rc.on_delete_request = lambda m: got.append(m)
+    rc._handle_inbound(json.dumps({"kind": "delete_request", "text": "{}"}))
+    assert len(got) == 1 and got[0]["kind"] == "delete_request"
+
+
+def test_handle_inbound_delete_request_no_callback_safe():
+    rc = _rc()
+    rc._handle_inbound(json.dumps({"kind": "delete_request", "text": "{}"}))  # on_delete_request=None → no crash

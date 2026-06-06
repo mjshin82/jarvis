@@ -93,3 +93,15 @@ def test_archive_response_admin_bypasses_pw(tmp_path):
     r = archive_response(store.get("m1"), "WRONG", 9, admin=True)
     assert r["ok"] is True and r["title"] == "주간"
     assert archive_response(None, "x", 1, admin=True) == {"req": 1, "ok": False}
+
+
+def test_delete_removes_only_target(tmp_path):
+    from meeting_store import MeetingStore
+    store = MeetingStore(str(tmp_path / "m.db"))
+    for i in ("a", "b"):
+        store.save({"id": i, "password_hash": "h", "title": i,
+                    "started_at": "s", "ended_at": "e", "transcript": []})
+    store.delete("a")
+    assert store.get("a") is None
+    assert store.get("b") is not None
+    store.delete("nope")    # 없는 id 삭제 — 예외 없이 무시

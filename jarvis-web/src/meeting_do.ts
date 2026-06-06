@@ -188,6 +188,15 @@ export class MeetingDO {
       this.safeSend(ws, this.buildEvent({ kind: "meeting_list", text: JSON.stringify({ meetings: d.meetings || [] }) }));
       return;
     }
+    if (msg.kind === "delete_response") {
+      let d: any;
+      try { d = JSON.parse(msg.text || "{}"); } catch { return; }
+      const ws = this.pendingArchive.get(d.req);
+      if (!ws) return;
+      this.pendingArchive.delete(d.req);
+      this.safeSend(ws, this.buildEvent({ kind: "meeting_deleted", text: JSON.stringify({ id: d.id, ok: d.ok }) }));
+      return;
+    }
     if (msg.kind === "meeting_summary") {
       this.broadcast(this.buildEvent(msg));
       return;
@@ -224,15 +233,19 @@ export class MeetingDO {
       let msg: any;
       try { msg = JSON.parse(typeof evt.data === "string" ? evt.data : ""); } catch { return; }
       if (!msg) return;
-      // 관리자 목록 요청
-      if (msg.kind === "list") {
-        done = true; clearTimeout(timer);
+      // 관리자 명령 채널(list/delete) — 같은 소켓으로 반복 처리
+      if (msg.kind === "list" || msg.kind === "delete") {
+        clearTimeout(timer);
         if (!isAdmin) { try { ws.close(4003, "admin-only"); } catch { /* */ } return; }
         if (!this.publisher) { try { ws.close(4003, "no-meeting"); } catch { /* */ } return; }
         const req = ++this.archiveSeq;
         this.pendingArchive.set(req, ws);
-        this.safeSend(this.publisher, this.buildEvent({ kind: "list_request", text: JSON.stringify({ req }) }));
-        setTimeout(() => { if (this.pendingArchive.delete(req)) { try { ws.close(4003, "list-timeout"); } catch { /* */ } } }, 10000);
+        if (msg.kind === "list") {
+          this.safeSend(this.publisher, this.buildEvent({ kind: "list_request", text: JSON.stringify({ req }) }));
+        } else {
+          this.safeSend(this.publisher, this.buildEvent({ kind: "delete_request", text: JSON.stringify({ req, id: msg.id }) }));
+        }
+        setTimeout(() => { this.pendingArchive.delete(req); }, 10000);   // 응답 타임아웃 — 소켓 유지
         return;
       }
       if (msg.kind !== "auth") return;

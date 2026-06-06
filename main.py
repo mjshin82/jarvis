@@ -381,6 +381,26 @@ async def main():
     if web_pub is not None:
         web_pub.on_list_request = _serve_list
 
+    def _serve_delete(msg):
+        """DO → delete_request: 회의 삭제(관리자 전용 — DO 가 admin 검증)."""
+        try:
+            data = json.loads(msg.get("text") or "{}")
+        except Exception:
+            return
+        mid = data.get("id") or ""
+        try:
+            store.delete(mid)
+            ok = True
+        except Exception as e:
+            console.log(f"회의 삭제 실패({mid}): {e}")
+            ok = False
+        if web_pub is not None:
+            web_pub.emit("delete_response", json.dumps(
+                {"req": data.get("req"), "ok": ok, "id": mid}, ensure_ascii=False))
+
+    if web_pub is not None:
+        web_pub.on_delete_request = _serve_delete
+
     def _save_meeting(record):
         """종료 시 즉시 저장 → 트랜스크립트 있으면 백그라운드 요약 후 갱신."""
         async def _run():

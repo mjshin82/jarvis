@@ -60,6 +60,10 @@ class MeetingStore:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def delete(self, meeting_id: str) -> None:
+        with self._conn() as c:
+            c.execute("DELETE FROM meetings WHERE id=?", (meeting_id,))
+
 
 def archive_response(row: dict | None, pw: str, req, *, admin: bool = False) -> dict:
     """저장 행(dict|None) + 평문 pw → archive_response 페이로드.
