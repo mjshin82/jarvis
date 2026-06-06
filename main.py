@@ -29,7 +29,7 @@ import commands
 import json
 import settings
 import coach
-from intent import mode_intent
+from mode_intent import mode_intent
 from audio_io import Microphone
 from audio_backend import make_backend
 from stt import STT
