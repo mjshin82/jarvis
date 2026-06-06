@@ -70,6 +70,7 @@ describe("I18N.apply (DOM 적용)", () => {
     I18N.apply(document);
     expect(document.querySelector("h1")!.textContent).toBe("入る");
     expect(document.querySelector("input")!.getAttribute("placeholder")).toBe("パスワード");
+    // documentElement.lang 은 init()(load() 의 IIFE eval 시 자동 실행)이 설정한다 — apply() 가 아니라 init 의 부수효과 검증.
     expect(document.documentElement.lang).toBe("ja");
   });
 });
