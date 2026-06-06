@@ -10,12 +10,12 @@
   :root {
     color-scheme: light dark;
     --bg: #ffffff; --fg: #111418; --muted: #6b7280; --card: #f5f6f8;
-    --border: #e5e7eb; --accent: #2563eb; --ko: #0a7e0a; --en: #b04300; --partial: #9aa0a6;
+    --border: #e5e7eb; --accent: #2563eb; --ko: #0a7e0a; --en: #b04300; --partial: #9aa0a6; --ja: #1d4ed8; --zh: #9333ea;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #0e1116; --fg: #e8eaed; --muted: #9aa0a6; --card: #161a21;
-      --border: #2a2f37; --accent: #60a5fa; --ko: #7ee787; --en: #ffb86b; --partial: #6b7280;
+      --border: #2a2f37; --accent: #60a5fa; --ko: #7ee787; --en: #ffb86b; --partial: #6b7280; --ja: #93c5fd; --zh: #d8b4fe;
     }
   }
   * { box-sizing: border-box; }
@@ -115,6 +115,8 @@
   .tx { font-size: 17px; margin-top: 6px; }
   .tx.ko { color: var(--ko); }
   .tx.en { color: var(--en); }
+  .tx.ja { color: var(--ja); }
+  .tx.zh { color: var(--zh); }
   .info { color: var(--muted); font-size: 13px; }
   .draft .src::after { content: "▍"; display: inline-block; margin-left: 4px; animation: blink 1s steps(2, start) infinite; opacity: 0.6; }
   @keyframes blink { to { visibility: hidden; } }
@@ -432,10 +434,9 @@
         lastCard = card;
         break;
       }
-      case "translation_ko":
-      case "translation_en": {
-        const cls = ev.kind === "translation_ko" ? "ko" : "en";
-        const sym = ev.kind === "translation_ko" ? "🌐" : "🇺🇸";
+      case "translation": {
+        const map = { ko: ["🇰🇷", "ko"], en: ["🇺🇸", "en"], ja: ["🇯🇵", "ja"], zh: ["🇨🇳", "zh"] };
+        const [sym, cls] = map[ev.lang] || ["🌐", ""];
         const html = `<div class="tx ${cls}">${sym} ${escapeHtml(ev.text || "")}</div>`;
         if (lastCard) { lastCard.insertAdjacentHTML("beforeend", html); }
         else { const card = newCard(); card.innerHTML = html; lastCard = card; }
