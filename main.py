@@ -37,7 +37,7 @@ from audio_io import Microphone
 from audio_backend import make_backend
 from stt import STT
 from llm import LLM
-from meeting_store import MeetingStore, archive_response
+from meeting_store import MeetingStore, archive_response, lang_text
 from live_translate import hash_password
 from tts import TTS
 from player import Player
@@ -412,16 +412,14 @@ async def main():
             except Exception as e:
                 console.log(f"회의 저장 실패: {e}")
                 return
-            def _line_text(e):
-                src = e.get("source") or ""
-                tx = " / ".join(v for v in (e.get("translations") or {}).values() if v)
-                return src + (f" / {tx}" if tx else "")
-            text = "\n".join(_line_text(e) for e in lines)
             langs = record.get("languages") or ["ko"]
             summaries = {}
             for lc in langs:
+                lc_text = lang_text(lines, lc, langs)       # 그 언어 텍스트만
+                if not lc_text.strip():
+                    continue
                 try:
-                    s = await llm.summarize(text, languages.NAMES.get(lc, lc))
+                    s = await llm.summarize(lc_text, languages.NAMES.get(lc, lc))
                 except Exception as e:
                     console.log(f"회의 요약 실패({lc}): {e}")
                     continue
