@@ -51,6 +51,8 @@ DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"
 GLADIA_API_KEY = os.getenv("GLADIA_API_KEY", "")
 MEET_GLADIA_MODEL = os.getenv("MEET_GLADIA_MODEL", "solaria-1")
 MEET_GLADIA_LANGUAGES = os.getenv("MEET_GLADIA_LANGUAGES", "ko,en")
+MEET_GLADIA_ENDPOINTING = float(os.getenv("MEET_GLADIA_ENDPOINTING", "0.8"))   # 침묵 N초→발화종료(Gladia 기본 0.05, ↑=덜 끊김)
+MEET_GLADIA_MAX_DURATION = float(os.getenv("MEET_GLADIA_MAX_DURATION", "15"))   # 침묵 없어도 N초면 강제 종료
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 
 # local: Ollama. 서버 실행 `ollama serve`, 모델 준비 `ollama pull gemma4:e4b`

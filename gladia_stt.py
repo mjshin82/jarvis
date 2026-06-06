@@ -19,7 +19,7 @@ _BASE = "https://api.gladia.io"
 class GladiaSTT:
     def __init__(self, api_key, *, model="solaria-1", languages=("ko", "en"),
                  on_partial, on_final, on_log=print, connect_timeout=5.0,
-                 vocabulary=()):
+                 vocabulary=(), endpointing=0.8, max_duration=15.0):
         self.api_key = api_key
         self.model = model or "solaria-1"
         self.languages = list(languages) or ["ko", "en"]
@@ -28,6 +28,8 @@ class GladiaSTT:
         self.on_log = on_log
         self.connect_timeout = connect_timeout
         self.vocabulary = list(vocabulary)
+        self.endpointing = endpointing      # 침묵 N초 → 발화 종료(↑일수록 덜 끊김; Gladia 기본 0.05)
+        self.max_duration = max_duration     # 침묵 없어도 N초면 강제 종료
         self._out_q: asyncio.Queue = asyncio.Queue(maxsize=2000)
         self._stop = asyncio.Event()
         self._connected = asyncio.Event()
@@ -45,6 +47,8 @@ class GladiaSTT:
                 "receive_partial_transcripts": True,
                 "receive_final_transcripts": True,
             },
+            "endpointing": self.endpointing,
+            "maximum_duration_without_endpointing": self.max_duration,
         }
         if self.vocabulary:
             lang = self.languages[0] if self.languages else "ko"

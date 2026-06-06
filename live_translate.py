@@ -242,6 +242,8 @@ class MeetingSession:
                     config.GLADIA_API_KEY, model=config.MEET_GLADIA_MODEL, languages=langs,
                     on_partial=self._stt_partial, on_final=self._stt_final, on_log=self.log,
                     vocabulary=self.meta.vocabulary,
+                    endpointing=config.MEET_GLADIA_ENDPOINTING,
+                    max_duration=config.MEET_GLADIA_MAX_DURATION,
                 )
                 await self._stt.start()
                 self.log(f"🎤 회의 STT: Gladia ({config.MEET_GLADIA_MODEL}, {','.join(langs)})")
