@@ -34,6 +34,7 @@ class ConversationController:
                  after_meeting_start, dispatch_command, fx,
                  drain_queue=lambda: None,
                  persist_mode=lambda m: None,
+                 save_meeting=lambda record: None,
                  follow_up=True, listen_timeout_s=8.0, hands_free_timeout_s=30.0,
                  clock=time.monotonic):
         self.mic = mic
@@ -41,6 +42,7 @@ class ConversationController:
         self.player = player
         self.web_pub = web_pub
         self.persist_mode = persist_mode
+        self.save_meeting = save_meeting
         self.log = log
         self.set_status = set_status
         self.speak = speak
@@ -129,6 +131,10 @@ class ConversationController:
                     await self.meeting_session.stop()
                 except Exception as e:
                     self.log(f"회의 종료 중 오류: {e}")
+                try:
+                    self.save_meeting(self.meeting_session.record())
+                except Exception as e:
+                    self.log(f"회의 기록 저장 실패: {e}")
                 self.mic.restore_mode(self.saved_mic_mode)   # 회의 전 소스 복원(불변식)
                 self.set_status(None)
                 if self.web_pub is not None:

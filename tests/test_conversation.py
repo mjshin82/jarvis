@@ -35,6 +35,7 @@ class FakeSession:
     async def start(self): self.started = True
     async def stop(self): self.stopped = True
     def feed_block(self, b): self.fed.append(b)
+    def record(self): return {"id": "fake", "transcript": []}
 
 class FakeSetup:
     def __init__(self, done=True, meta="META"):
@@ -453,4 +454,16 @@ def test_start_meeting_default_no_prompt():
         c = make_controller(make_meeting=lambda meta: sess)   # FakeSetup done=True
         await c.start_meeting()                  # interactive=False → 기본값 즉시 시작
         assert c.meeting_phase is MeetingPhase.LIVE
+    asyncio.run(run())
+
+
+def test_meeting_end_saves_record():
+    async def run():
+        saved = []
+        sess = FakeSession()
+        c = make_controller(make_meeting=lambda meta: sess,
+                            save_meeting=lambda r: saved.append(r))
+        await c.start_meeting()
+        await c.stop_meeting()
+        assert saved == [{"id": "fake", "transcript": []}]
     asyncio.run(run())
