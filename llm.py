@@ -247,10 +247,11 @@ class LLM:
                 "first. Use ### (h3) for subsections. Never use #### or deeper.\n"
                 "- Use bullet points and **bold** for emphasis. Do not put quotes inside bold "
                 "(write **text**, not **\"text\"**).\n"
-                "- Use a Markdown table (| ... |) when comparing figures or itemized attributes.\n"
                 "- For number ranges use a hyphen (2015-2020, not 2015~2020).\n\n"
-                "Cover: key discussion points, decisions made, and action items (owner + task). "
-                "Never invent information not in the conversation. "
+                "Be concise and proportional to the conversation: a short conversation needs only "
+                "a few bullets and may have no section headings at all. The summary MUST be shorter "
+                "than the conversation — never pad, repeat, or invent. Summarize only what was "
+                "actually said: key points, decisions, and action items (if any). "
                 "Output ONLY the Markdown summary — no preamble, no code fences."
             )},
             {"role": "user", "content": text},
