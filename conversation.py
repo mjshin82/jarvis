@@ -33,7 +33,8 @@ class ConversationController:
                  mode_intent, translate_mode, make_setup, make_meeting,
                  after_meeting_start, dispatch_command, fx,
                  drain_queue=lambda: None,
-                 follow_up=True, listen_timeout_s=8.0, clock=time.monotonic):
+                 follow_up=True, listen_timeout_s=8.0, hands_free_timeout_s=30.0,
+                 clock=time.monotonic):
         self.mic = mic
         self.recognizer = recognizer
         self.player = player
@@ -53,6 +54,7 @@ class ConversationController:
         self.fx = fx
         self.follow_up = follow_up
         self.listen_timeout_s = listen_timeout_s
+        self.hands_free_timeout_s = hands_free_timeout_s
         self._clock = clock
 
         self.mode = Mode.IDLE
@@ -139,12 +141,16 @@ class ConversationController:
         self.mode = Mode.IDLE
         self.phase = None
         self._apply_tap()
+        if self.recognizer is not None:
+            await self.recognizer.suspend()
         self.log("\n🎙️  'Hey Jarvis' 라고 부르거나 아래에 텍스트를 입력하세요.")
 
     async def _to_listening(self, cue=True):
         await self._teardown()
         self.mode = Mode.CONVERSING
         self.phase = Phase.LISTENING
+        if self.recognizer is not None:
+            await self.recognizer.resume()
         self._apply_tap()
         if cue:
             await self.player.enqueue_file(self.fx["wake"])
@@ -152,15 +158,17 @@ class ConversationController:
         self.watchdog = asyncio.create_task(self._listen_timeout())
 
     async def _listen_timeout(self):
+        timeout = self.hands_free_timeout_s if self.hands_free else self.listen_timeout_s
         try:
-            await asyncio.sleep(self.listen_timeout_s)
+            await asyncio.sleep(timeout)
         except asyncio.CancelledError:
             return
-        if self.hands_free:
+        if not (self.mode is Mode.CONVERSING and self.phase is Phase.LISTENING):
             return
-        if self.mode is Mode.CONVERSING and self.phase is Phase.LISTENING:
-            self.log("\n⌛ 입력이 없어 대기 상태로 돌아갑니다.")
-            await self._set_idle()
+        if self.hands_free and self.web_pub is not None:
+            self.web_pub.emit("mic_release")     # 웹에 마이크 해제 신호(얼럿 없이 버튼만)
+        self.log("\n⌛ 입력이 없어 대기 상태로 돌아갑니다.")
+        await self._set_idle()
 
     # --- 발화 처리 ---
     async def on_speech_start(self):
