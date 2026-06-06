@@ -156,6 +156,9 @@ async def _reload_settings(args: str, ctx: dict):
     import json
     import settings
     settings.load()
+    _llm = ctx.get("llm")
+    if _llm is not None:
+        _llm.set_backend(settings.get("conversation_llm_backend"))
     ctx["log"](f"⚙️ setting.yaml 재로드: {settings.current()}")
     web_pub = ctx.get("web_pub")
     if web_pub is not None:
