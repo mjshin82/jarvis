@@ -161,6 +161,8 @@
   body.server-down #mic-src-toggle,
   body.server-down #meeting-stop,
   body.server-down #plus-menu button { opacity: 0.45; pointer-events: none; cursor: not-allowed; animation: none; }
+  #meeting-form .row label { font-size: 14px; margin-right: 12px; display: inline-block; }
+  #meeting-form .row label input { margin-right: 4px; }
   .hidden { display: none !important; }
   #meeting-share { padding: 8px 12px; font-size: 13px; border-bottom: 1px solid var(--border);
     color: var(--muted); display: flex; gap: 8px; align-items: center; word-break: break-all; }
@@ -182,6 +184,12 @@
     <div class="sheet">
       <div class="sheet-head"><b>회의 시작</b><button id="mf-cancel">✕</button></div>
       <div class="row"><div>회의 제목</div><input id="mf-title" type="text" placeholder="회의 제목" /></div>
+      <div class="row"><div>언어</div>
+        <label><input type="checkbox" class="mf-lang" value="ko" checked> 한국어</label>
+        <label><input type="checkbox" class="mf-lang" value="en" checked> English</label>
+        <label><input type="checkbox" class="mf-lang" value="jp"> 日本語</label>
+        <label><input type="checkbox" class="mf-lang" value="zh"> 中文</label>
+      </div>
       <div class="row"><div>워드북 (쉼표 구분)</div><input id="mf-vocab" type="text" placeholder="Jarvis, 이름" /></div>
       <div class="row"><div>비번 (선택 — 비우면 자동)</div><input id="mf-pass" type="text" placeholder="비번" /></div>
       <button id="mf-start">시작</button>
@@ -688,6 +696,7 @@
     if (!getPw()) { showLogin(); return; }
     $("plus-menu").classList.add("hidden");
     $("mf-title").value = ""; $("mf-vocab").value = ""; $("mf-pass").value = "";
+    document.querySelectorAll(".mf-lang").forEach((c) => { c.checked = (c.value === "ko" || c.value === "en"); });
     $("meeting-form").classList.remove("hidden");
     $("mf-title").focus();
   });
@@ -697,9 +706,10 @@
     const title = $("mf-title").value.trim();
     const vocab = $("mf-vocab").value.split(",").map((s) => s.trim()).filter(Boolean);
     const password = $("mf-pass").value.trim();
+    const languages = [...document.querySelectorAll(".mf-lang:checked")].map((c) => c.value);
     $("meeting-form").classList.add("hidden");
     showMeetingLoading();
-    sendControl({ kind: "meeting_start", title, vocabulary: vocab, password });
+    sendControl({ kind: "meeting_start", title, vocabulary: vocab, password, languages });
   });
   // ---- 설정 모달 ----
   function fillSettings(s) {
