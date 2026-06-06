@@ -83,7 +83,7 @@ _META_STEPS = (
 
 
 class MeetingSetup:
-    """메타 입력 진행 상태. title → vocabulary 두 단계 입력 후 done.
+    """메타 입력 진행 상태. title → languages → vocabulary → password 네 단계 입력 후 done.
     my_name 은 config.USER_NAME 으로 자동 채움."""
 
     def __init__(self, default_my_name: str = "Concode"):
@@ -159,7 +159,7 @@ class MeetingSession:
         self._tx_tasks: set = set()           # 진행 중 번역 태스크 (종료 시 대기)
 
     def add_listener(self, callback) -> None:
-        """매 _emit 호출 시 callback(kind, text) 가 함께 불린다.
+        """매 _emit 호출 시 callback(kind, text, lang) 가 함께 불린다 (lang 은 번역 언어, 그 외엔 "").
         callback 은 동기 함수든 코루틴 함수든 OK (fire-and-forget)."""
         self._listeners.append(callback)
 
@@ -240,7 +240,7 @@ class MeetingSession:
                     vocabulary=self.meta.vocabulary,
                 )
                 await self._stt.start()
-                self.log(f"🎤 회의 STT: Gladia ({config.MEET_GLADIA_MODEL}, {config.MEET_GLADIA_LANGUAGES})")
+                self.log(f"🎤 회의 STT: Gladia ({config.MEET_GLADIA_MODEL}, {','.join(langs)})")
             except Exception as e:
                 self._stt = None
                 self.log(f"Gladia 연결 실패 — 로컬 STT 폴백: {e}")
