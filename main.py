@@ -110,8 +110,9 @@ async def main():
                          if isinstance(v, str) and v.strip()]
                 if not vocab:
                     vocab = ["Jarvis", config.USER_NAME]
+                password = (msg.get("password") or "").strip()
                 await controller.start_meeting(meta=MeetingMeta(
-                    my_name=config.USER_NAME, title=title, vocabulary=vocab))
+                    my_name=config.USER_NAME, title=title, vocabulary=vocab, password=password))
             elif kind == "mic_system":
                 mic.router.set_override("local")
             elif kind == "mic_phone":

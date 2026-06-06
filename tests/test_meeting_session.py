@@ -53,9 +53,12 @@ def test_setup_submit_title_and_vocab():
     s = MeetingSetup(default_my_name="민준")
     s.submit("주간회의")
     s.submit("신명진, 콘코드, Jarvis")
+    assert not s.done                      # password 단계 남음
+    s.submit("secret")
     assert s.done
     assert s.meta.title == "주간회의"
     assert s.meta.vocabulary == ["신명진", "콘코드", "Jarvis"]
+    assert s.meta.password == "secret"
 
 
 def test_setup_empty_keeps_defaults():
@@ -146,3 +149,11 @@ def test_stop_awaits_pending_translations():
         await sess.stop()
         assert done == [True]
     asyncio.run(run())
+
+
+def test_setup_password_empty_stays_blank():
+    from live_translate import MeetingSetup
+    s = MeetingSetup(default_my_name="민준")
+    s.submit(""); s.submit(""); s.submit("")
+    assert s.done
+    assert s.meta.password == ""   # 빈 입력 → 세션 시작 시 자동 생성
