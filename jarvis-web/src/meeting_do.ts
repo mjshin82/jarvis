@@ -128,6 +128,11 @@ export class MeetingDO {
       this.broadcast(this.buildEvent(msg));
       return;
     }
+    // mic_release: 일시 신호(상태 아님) — owner 에게만 broadcast, replay 미적재.
+    if (msg.kind === "mic_release") {
+      this.broadcast(this.buildEvent(msg));
+      return;
+    }
     // 그 외: append + broadcast
     this.append(this.buildEvent(msg));
   }
