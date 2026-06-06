@@ -278,13 +278,17 @@ class ConversationController:
         if self.in_meeting_setup():
             await self._handle_setup_input(line)
             return
+        await self._cancel(self.watchdog); self.watchdog = None
         self.response = asyncio.create_task(self._respond_text(line))
 
     async def _respond_text(self, line):
-        handled = await self.dispatch_command(line)
-        if handled:
-            return
-        await self._dispatch_response_text(line, from_voice=False)
+        result = await self.dispatch_command(line)
+        if result is None:
+            await self._dispatch_response_text(line, from_voice=False)
+        elif result is False:
+            await self._wait_output_done()
+            await self._set_idle()
+        # result is True → 명령이 상태 점유, 아무 것도 안 함
 
     # --- TRANSLATE ---
     async def start_translate(self, src_lang):

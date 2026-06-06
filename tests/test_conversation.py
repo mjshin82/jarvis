@@ -45,7 +45,7 @@ def make_controller(**over):
     async def transcribe(a): return spans.get("stt", "안녕")
     async def translate_audio(a): spans.setdefault("tx", []).append(a)
     def mode_intent(t): return spans.get("intent")
-    async def dispatch_command(line): return spans.get("handled", False)
+    async def dispatch_command(line): return spans.get("handled", None)
     class TM:
         def __init__(s): s.on = False; s.lang = None
         def is_translate(s): return s.on
@@ -349,4 +349,27 @@ def test_drain_queue_called_on_wake():
         await c.on_wake()
         assert drained == [1]
         await c._cancel(c.watchdog)
+    asyncio.run(run())
+
+
+def test_on_text_command_ran_but_not_state_idles_without_speak():
+    async def run():
+        c = make_controller()
+        c.spans["handled"] = False   # 명령 실행됨, 상태 미점유 → idle, LLM 호출 X
+        await c.on_text("/tts 안녕")
+        await c.response
+        assert "speak" not in c.spans
+        assert c.mode is Mode.IDLE
+    asyncio.run(run())
+
+
+def test_on_text_cancels_listen_watchdog():
+    async def run():
+        c = make_controller()
+        c.follow_up = False
+        await c._to_listening(cue=False)   # watchdog armed
+        assert c.watchdog is not None
+        await c.on_text("질문")
+        assert c.watchdog is None          # 타이핑 시 listen watchdog 취소
+        await c.response
     asyncio.run(run())

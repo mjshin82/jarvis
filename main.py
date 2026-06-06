@@ -124,7 +124,6 @@ async def main():
             on_command=_on_remote_command, on_log=console.log,
             key=config.ROOM_KEY, connect_timeout=config.RELAY_TIMEOUT_S,
         )
-        control_rx.start()
     text_queue: asyncio.Queue[str] = asyncio.Queue()   # 텍스트 입력 대기열
     exit_event = asyncio.Event()           # /bye 등 명시적 종료 요청
 
@@ -275,11 +274,9 @@ async def main():
             model=config.MEET_STT_MODEL, realtime_model=config.MEET_STT_REALTIME_MODEL,
             language=config.WHISPER_LANG, on_log=console.log,
         )
-        await recognizer.start()
-        console.log("🗣️ 스트리밍 STT 준비됨 (호출어 후 실시간 인식)")
     except Exception as e:
         recognizer = None
-        console.log(f"스트리밍 STT 비활성 — 배치 STT 폴백: {e}")
+        console.log(f"스트리밍 STT 생성 실패 — 배치 STT 폴백: {e}")
 
     from conversation import ConversationController
 
@@ -306,11 +303,11 @@ async def main():
         return MeetingSetup(default_my_name=config.USER_NAME)
 
     async def _dispatch_command(line):
+        if not commands.is_command(line):
+            return None
         cmd_ctx["handled_state"] = False
-        if commands.is_command(line):
-            await commands.dispatch(line, cmd_ctx)
-            return bool(cmd_ctx.get("handled_state"))
-        return False
+        await commands.dispatch(line, cmd_ctx)
+        return bool(cmd_ctx.get("handled_state"))
 
     controller = ConversationController(
         mic=mic.router, recognizer=recognizer, player=player, web_pub=web_pub,
@@ -330,6 +327,17 @@ async def main():
     cmd_ctx["start_meeting"] = controller.start_meeting
     cmd_ctx["stop_meeting"] = controller.stop_meeting
     cmd_ctx["in_meeting"] = controller.in_meeting
+
+    if control_rx is not None:
+        control_rx.start()
+    if recognizer is not None:
+        try:
+            await recognizer.start()
+            console.log("🗣️ 스트리밍 STT 준비됨 (호출어 후 실시간 인식)")
+        except Exception as e:
+            recognizer = None
+            controller.recognizer = None
+            console.log(f"스트리밍 STT 비활성 — 배치 STT 폴백: {e}")
 
     console.set_escape_handler(on_escape)   # Esc → 진행 응답 취소
     await controller._set_idle()
