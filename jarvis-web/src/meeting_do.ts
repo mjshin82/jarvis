@@ -17,7 +17,7 @@ interface Env {
 // 공개(public) 뷰어에게 보내도 되는 자막 계열 kind. 그 외(user/assistant/navigate/mic_source)·
 // 바이너리 TTS 는 owner 전용.
 const PUBLIC_KINDS = new Set([
-  "hello", "source", "translation_ko", "translation_en", "partial",
+  "hello", "source", "translation", "partial",
   "gap", "info", "end", "kicked", "publisher_disconnected",
 ]);
 
