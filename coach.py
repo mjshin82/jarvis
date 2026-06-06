@@ -132,3 +132,77 @@ async def translate_meeting(client, model: str, text: str,
     except Exception as ex:
         print(f"[coach] translate_meeting fallback: {ex}")
         return text
+
+
+# --- 다국어 회의 전용 번역 (단일 호출 → 모든 룸 언어로 동시 번역) ---
+
+_MEET_MULTI_TEMPLATE = """You are a professional simultaneous interpreter for a business meeting.
+Room languages: {langs}.
+Detect the language of each input utterance and translate it into ALL the OTHER room languages (exclude the source language).
+Output ONLY a JSON object mapping language code to translation, e.g. {{"en": "...", "ja": "..."}}. Use codes: ko, en, ja, zh. No commentary, no source-language key, no code fences.
+
+Quality rules:
+- Natural and conversational — what a fluent interpreter would actually say, not word-for-word.
+- Preserve proper nouns exactly (see glossary); correct STT near-misses.
+- Never add information not in the source.
+
+Meeting context:
+{context}
+
+Proper nouns glossary (recognize variants, output canonical form):
+{glossary}"""
+
+
+def build_multi_system_prompt(lang_names: list, context: str, glossary_lines: list) -> str:
+    """다국어 회의 번역 시스템 프롬프트. 룸 언어 고정 → 회의당 동일(캐시 히트)."""
+    glossary = "\n".join(f"- {l}" for l in glossary_lines) if glossary_lines else "- (none)"
+    ctx = (context or "").strip() or "(general business meeting)"
+    return _MEET_MULTI_TEMPLATE.format(langs=", ".join(lang_names), context=ctx, glossary=glossary)
+
+
+def _parse_json_obj(s: str) -> dict:
+    """LLM 출력에서 JSON 오브젝트만 추출(코드펜스/잡텍스트 방어). 실패 시 {}."""
+    import json
+    import re
+    s = (s or "").strip()
+    if s.startswith("```"):
+        s = s.strip("`")
+        if "{" in s:
+            s = s[s.find("{"):]
+    try:
+        d = json.loads(s)
+    except Exception:
+        m = re.search(r"\{.*\}", s, re.S)
+        if not m:
+            return {}
+        try:
+            d = json.loads(m.group(0))
+        except Exception:
+            return {}
+    if not isinstance(d, dict):
+        return {}
+    return {str(k): str(v) for k, v in d.items() if isinstance(v, str) and v.strip()}
+
+
+async def translate_multi(client, model: str, text: str,
+                          system_prompt: str, extra: dict | None = None) -> dict:
+    """발화 1건을 룸의 나머지 언어들로 번역(단일 호출, JSON). 실패/빈 입력 → {}."""
+    text = (text or "").strip()
+    if not text:
+        return {}
+    try:
+        r = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": text},
+            ],
+            max_tokens=800,
+            temperature=0.2,
+            extra_body=extra or {},
+        )
+        out = (r.choices[0].message.content or "").strip()
+        return _parse_json_obj(out)
+    except Exception as ex:
+        print(f"[coach] translate_multi fallback: {ex}")
+        return {}
