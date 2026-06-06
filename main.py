@@ -266,17 +266,30 @@ async def main():
             _refresh_queue_display()
             await controller.on_text(line)
 
-    try:
-        from streaming_stt import StreamingRecognizer
-        recognizer = StreamingRecognizer(
+    from streaming_stt import StreamingRecognizer
+    from conversation_stt import ConversationSTT
+
+    def _make_local():
+        return StreamingRecognizer(
             on_partial=lambda t: controller.on_partial(t),
             on_final=lambda t: controller.on_final(t),
             model=config.MEET_STT_MODEL, realtime_model=config.MEET_STT_REALTIME_MODEL,
             language=config.WHISPER_LANG, on_log=console.log,
         )
-    except Exception as e:
-        recognizer = None
-        console.log(f"스트리밍 STT 생성 실패 — 배치 STT 폴백: {e}")
+
+    def _make_gladia():
+        from gladia_stt import GladiaSTT
+        langs = [s.strip() for s in config.MEET_GLADIA_LANGUAGES.split(",") if s.strip()]
+        return GladiaSTT(
+            config.GLADIA_API_KEY, model=config.MEET_GLADIA_MODEL, languages=langs,
+            on_partial=lambda t: controller.on_partial(t),
+            on_final=lambda t: controller.on_final(t), on_log=console.log,
+        )
+
+    recognizer = ConversationSTT(
+        make_local=_make_local, make_gladia=_make_gladia,
+        settings_get=settings.get, on_log=console.log,
+    )
 
     from conversation import ConversationController
 
@@ -319,6 +332,7 @@ async def main():
         drain_queue=_drain_text_queue,
         fx={"wake": config.FX_WAKE, "ok": config.FX_OK},
         follow_up=config.FOLLOW_UP, listen_timeout_s=config.LISTEN_TIMEOUT_S,
+        hands_free_timeout_s=config.HANDS_FREE_TIMEOUT_S,
     )
 
     cmd_ctx["trigger_wake"] = controller.on_wake
@@ -330,14 +344,8 @@ async def main():
 
     if control_rx is not None:
         control_rx.start()
-    if recognizer is not None:
-        try:
-            await recognizer.start()
-            console.log("🗣️ 스트리밍 STT 준비됨 (호출어 후 실시간 인식)")
-        except Exception as e:
-            recognizer = None
-            controller.recognizer = None
-            console.log(f"스트리밍 STT 비활성 — 배치 STT 폴백: {e}")
+    await recognizer.start()
+    console.log("🗣️ 스트리밍 STT 준비됨 (호출어 후 실시간 인식)")
 
     console.set_escape_handler(on_escape)   # Esc → 진행 응답 취소
     await controller._set_idle()
@@ -386,7 +394,7 @@ async def main():
                 pass
         if recognizer is not None:
             try:
-                await recognizer.close()
+                await recognizer.aclose()
             except Exception:
                 pass
         try:
