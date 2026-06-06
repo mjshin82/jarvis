@@ -170,6 +170,11 @@
         <label><input type="radio" name="set-stt" value="gladia"> Gladia</label>
         <label><input type="radio" name="set-stt" value="local"> 로컬</label>
       </div>
+      <div class="sheet-row">
+        <div class="sheet-label">일반 대화 STT</div>
+        <label><input type="radio" name="set-conv-stt" value="gladia"> Gladia</label>
+        <label><input type="radio" name="set-conv-stt" value="local"> 로컬</label>
+      </div>
     </div>
   </div>
   <div id="dock">
@@ -393,6 +398,11 @@
       case "settings":
         try { fillSettings(JSON.parse(ev.text || "{}")); } catch {}
         return;
+      case "mic_release":
+        voiceOn = false;
+        $("voice-toggle").classList.remove("active");
+        mic.apply();      // 의도적 중단(gen 가드 → onLost 미발화 → 얼럿 없음)
+        return;
       case "mic_source":
         micSource = ev.source || "system";
         $("mic-src-toggle").classList.toggle("active", micSource === "remote");   // 붉은=폰
@@ -588,11 +598,14 @@
   function fillSettings(s) {
     document.querySelectorAll('input[name="set-translate"]').forEach((r) => { r.checked = (r.value === s.translate_backend); });
     document.querySelectorAll('input[name="set-stt"]').forEach((r) => { r.checked = (r.value === s.stt_backend); });
+    document.querySelectorAll('input[name="set-conv-stt"]').forEach((r) => { r.checked = (r.value === s.conversation_stt_backend); });
   }
   function curSettings() {
     const t = document.querySelector('input[name="set-translate"]:checked');
     const s = document.querySelector('input[name="set-stt"]:checked');
-    return { translate_backend: t ? t.value : "deepseek", stt_backend: s ? s.value : "gladia" };
+    const c = document.querySelector('input[name="set-conv-stt"]:checked');
+    return { translate_backend: t ? t.value : "deepseek", stt_backend: s ? s.value : "gladia",
+             conversation_stt_backend: c ? c.value : "local" };
   }
   $("menu-settings").addEventListener("click", () => {
     $("plus-menu").classList.add("hidden");

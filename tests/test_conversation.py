@@ -16,6 +16,9 @@ class FakeMic:
 class FakeRecognizer:
     def __init__(self): self.fed = []
     def feed_block(self, b): self.fed.append(b)
+    async def resume(self): pass
+    async def suspend(self): pass
+    async def aclose(self): pass
 
 class FakePlayer:
     def __init__(self): self.speaking = False; self.files = []; self.flushed = 0
@@ -59,7 +62,7 @@ def make_controller(**over):
         make_setup=lambda: FakeSetup(), make_meeting=lambda meta: FakeSession(),
         after_meeting_start=lambda sess: spans.setdefault("after", []).append(sess),
         dispatch_command=dispatch_command, fx={"wake": "w.wav", "ok": "o.wav"},
-        follow_up=True, listen_timeout_s=0.05, clock=lambda: 0.0,
+        follow_up=True, listen_timeout_s=0.05, hands_free_timeout_s=30.0, clock=lambda: 0.0,
     )
     deps.update(over)
     c = ConversationController(**deps)
@@ -372,4 +375,24 @@ def test_on_text_cancels_listen_watchdog():
         await c.on_text("질문")
         assert c.watchdog is None          # 타이핑 시 listen watchdog 취소
         await c.response
+    asyncio.run(run())
+
+
+def test_hands_free_timeout_releases_web_mic_and_idles():
+    async def run():
+        c = make_controller(hands_free_timeout_s=0.02, listen_timeout_s=0.02)
+        await c.start_listening(hands_free=True)   # → CONVERSING/LISTENING, watchdog armed
+        await asyncio.sleep(0.06)                  # watchdog 발화 대기
+        assert ("mic_release", "") in c.web_pub.emits
+        assert c.mode is Mode.IDLE
+    asyncio.run(run())
+
+
+def test_non_handsfree_timeout_idles_without_mic_release():
+    async def run():
+        c = make_controller(hands_free_timeout_s=10.0, listen_timeout_s=0.02)
+        await c._to_listening(cue=False)           # hands_free=False
+        await asyncio.sleep(0.06)
+        assert c.mode is Mode.IDLE
+        assert ("mic_release", "") not in c.web_pub.emits
     asyncio.run(run())

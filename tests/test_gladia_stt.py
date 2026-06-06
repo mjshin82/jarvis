@@ -29,3 +29,13 @@ def test_non_transcript_and_empty_ignored():
     gl._handle_gladia_message({"type": "speech_start"})
     gl._handle_gladia_message(_msg(""))
     assert p == [] and f == []
+
+
+def test_feed_block_converts_float32_and_enqueues():
+    import numpy as np
+    from gladia_stt import GladiaSTT
+    g = GladiaSTT("k", on_partial=lambda t: None, on_final=lambda t: None)
+    g.feed_block(np.array([0.0, 1.0, -1.0], dtype=np.float32))
+    assert g._out_q.qsize() == 1
+    arr = np.frombuffer(g._out_q.get_nowait(), dtype="<i2")
+    assert arr[1] == 32767 and arr[2] == -32767
