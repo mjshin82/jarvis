@@ -473,6 +473,8 @@ async def main():
             )
             await sess.start()
             meeting_session["obj"] = sess
+            # 회의 전 라우팅 모드 저장 — 종료 시 복원해 일반 모드 소스 상태를 되살린다
+            meeting_session["saved_mic_mode"] = mic.router.snapshot_mode()
             # 활성 소스 블록을 메인 VAD 대신 RealtimeSTT 로 우회 (소스 전환은 동적)
             mic.router.set_tap(sess.feed_block)
             console.log(f"🎤 회의를 시작합니다. 회의 번호: {meta.key}")
@@ -498,6 +500,10 @@ async def main():
             await sess.stop()
         finally:
             mic.router.set_tap(None)   # 블록을 메인 큐(wake/VAD)로 복귀
+            # 회의 중 토글/idle 로 바뀐 소스를 회의 전 모드로 복원 (웹/폰 입력 유지)
+            saved = meeting_session.pop("saved_mic_mode", None)
+            if saved is not None:
+                mic.router.restore_mode(saved)
             meeting_session["obj"] = None
             console.set_status(None)
             if web_pub is not None:

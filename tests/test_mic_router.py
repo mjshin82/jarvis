@@ -129,3 +129,32 @@ def test_active_property():
     assert r.active == "local"
     r.set_override("remote")
     assert r.active == "remote"
+
+
+def test_idle_does_not_switch_while_tap_active():
+    """회의 tap 활성 중엔 idle 타임아웃이 소스를 뒤집지 않는다."""
+    q = queue.Queue()
+    r = MicRouter(q, local=_FakeLocal(), remote=_FakeRemote())
+    r.note_remote_activity(now=100.0)
+    assert r._active == "remote"
+    r.set_tap(lambda b: None)   # 회의 모드 진입
+    # tap 중 → idle 초과해도 remote 유지
+    r.check_idle(now=100.0 + config.REMOTE_MIC_IDLE_S + 5.0)
+    assert r._active == "remote"
+    # tap 해제 후엔 다시 idle 전환 동작
+    r.set_tap(None)
+    r.check_idle(now=100.0 + config.REMOTE_MIC_IDLE_S + 5.0)
+    assert r._active == "local"
+
+
+def test_snapshot_and_restore_mode():
+    """회의 전 모드를 저장했다가 종료 후 복원할 수 있다."""
+    q = queue.Queue()
+    r = MicRouter(q, local=_FakeLocal(), remote=_FakeRemote())
+    assert r.snapshot_mode() == "auto"
+    # 회의 중 토글로 모드가 고정됨
+    r.set_override("local")
+    assert r._mode == "local"
+    # 회의 종료 시 복원
+    r.restore_mode("auto")
+    assert r._mode == "auto"

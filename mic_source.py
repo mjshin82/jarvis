@@ -175,6 +175,8 @@ class MicRouter:
             self._switch("remote")
 
     def check_idle(self, now):
+        if self._tap is not None:
+            return   # 회의 등 tap 활성 중엔 idle 전환 억제(소스가 바뀌면 엉뚱한 입력을 tap)
         if self._mode == "auto" and self._active == "remote":
             if now - self._last_remote > config.REMOTE_MIC_IDLE_S:
                 self._switch("local")
@@ -186,6 +188,14 @@ class MicRouter:
         elif mode == "remote":
             self._switch("remote")
         # 'auto': 다음 활동/idle 검사를 따른다
+
+    def snapshot_mode(self):
+        """현재 라우팅 모드를 반환(회의 진입 전 저장용)."""
+        return self._mode
+
+    def restore_mode(self, mode):
+        """저장해둔 모드로 복원(회의 종료 후)."""
+        self.set_override(mode)
 
     def _switch(self, target):
         if self._active == target:
