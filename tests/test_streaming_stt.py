@@ -51,3 +51,46 @@ def test_final_dispatch_via_queue():
         await consumer
     asyncio.run(run())
     assert got == ["최종 텍스트"]
+
+
+def test_feed_block_updates_last_feed_ts():
+    rx = StreamingRecognizer(on_partial=lambda t: None, on_final=lambda t: None,
+                             clock=lambda: 123.0)
+    rx.recorder = _FakeRecorder()
+    rx.feed_block(np.zeros(4, dtype=np.float32))
+    assert rx._last_feed_ts == 123.0
+
+
+def test_maybe_flush_injects_silence_when_feed_stalls_with_pending_partial():
+    """발화 partial 이 떠 있는데 공급이 끊기면 → 무음 주입으로 final 을 유도."""
+    rx = StreamingRecognizer(on_partial=lambda t: None, on_final=lambda t: None)
+    rx.recorder = _FakeRecorder()
+    rx._partial_last = "오늘은 며칠이야"
+    rx._last_feed_ts = 100.0
+    # gap 미만 → 아무 것도 안 함
+    assert rx._maybe_flush(100.0 + rx._flush_after - 0.1) is False
+    assert rx.recorder.fed == []
+    # gap 초과 → 무음 주입
+    assert rx._maybe_flush(100.0 + rx._flush_after + 0.1) is True
+    assert len(rx.recorder.fed) == 1
+    pcm_bytes, sr = rx.recorder.fed[0]
+    pcm = np.frombuffer(pcm_bytes, dtype=np.int16)
+    assert sr == 16000
+    assert pcm.size > 0 and not pcm.any()   # 전부 0(무음)
+    # 방금 주입 → 다음 gap 까지 재주입 안 함
+    assert rx._maybe_flush(100.0 + rx._flush_after + 0.2) is False
+
+
+def test_maybe_flush_noop_without_pending_partial():
+    rx = StreamingRecognizer(on_partial=lambda t: None, on_final=lambda t: None)
+    rx.recorder = _FakeRecorder()
+    rx._partial_last = ""          # 확정 대기 발화 없음
+    rx._last_feed_ts = 0.0
+    assert rx._maybe_flush(10_000.0) is False
+    assert rx.recorder.fed == []
+
+
+def test_maybe_flush_noop_without_recorder():
+    rx = StreamingRecognizer(on_partial=lambda t: None, on_final=lambda t: None)
+    rx._partial_last = "뭔가"
+    assert rx._maybe_flush(10_000.0) is False   # recorder 없음 → 안전
