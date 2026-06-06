@@ -227,6 +227,7 @@
     if (document.body.dataset.view === nv) return;
     setView(nv);   // URL 은 /{name} 유지 — /meeting 은 공개 뷰어
   }
+  function curView() { return document.body.dataset.view === "meeting" ? "meeting" : "home"; }
 
   // ---- TTS Audio + 채팅 버블 (홈) ----
   let audioCtx = null, playHead = 0, keepAlive = null;
@@ -320,7 +321,7 @@
         }
         return;
       case "assistant": addText("assistant", ev.text || ""); return;
-      case "navigate": showView(ev.text); return;
+      case "navigate": showView(ev.text); mic.apply(); return;
       case "hello": applyMeta(ev.meta); return;
       case "info": {
         const card = newCard();
@@ -393,6 +394,7 @@
       case "mic_source":
         micSource = ev.source || "system";
         $("mic-src-toggle").classList.toggle("active", micSource === "remote");   // 붉은=폰
+        mic.apply();   // 낙관적 클릭과 어긋났으면 서버값으로 수렴
         return;
       default: return;
     }
@@ -435,8 +437,6 @@
     ws.addEventListener("error", () => { try { ws.close(); } catch {} });
   }
 
-  // ---- mic-take (셸 레벨 — 뷰 전환에도 유지) ----
-  let micWS = null, micNode = null, micStream = null, micOn = false, wakeLock = null;
   function downsample(input, inRate) {
     if (inRate === TARGET_SR) return input;
     const ratio = inRate / TARGET_SR, outLen = Math.floor(input.length / ratio);
@@ -452,51 +452,96 @@
     }
     return out;
   }
-  async function requestWakeLock() {
-    try { if ("wakeLock" in navigator) { wakeLock = await navigator.wakeLock.request("screen"); wakeLock.addEventListener("release", () => { wakeLock = null; }); } } catch {}
-  }
-  document.addEventListener("visibilitychange", () => {
-    if (micOn && wakeLock === null && document.visibilityState === "visible") requestWakeLock();
-  });
-  function loseMic(msg) {
-    micStop(); micOn = false;
-    voiceOn = false; $("voice-toggle").classList.remove("active");   // 마이크 끊김 → 음성 버튼 비활성
-    if (msg) alert(msg);
-  }
-  async function micStart() {
-    const pw = getPw();
-    if (!pw) { showLogin(); return; }
-    const proto = location.protocol === "https:" ? "wss:" : "ws:";
-    micWS = new WebSocket(`${proto}//${location.host}/mic/${encodeURIComponent(name)}?token=${encodeURIComponent(pw)}`);
-    micWS.binaryType = "arraybuffer";
-    let micOpened = false;
-    micWS.onopen = () => { micOpened = true; micWS.send(JSON.stringify({ kind: "mic_start" })); };
-    micWS.onmessage = (e) => { try { if (JSON.parse(e.data).kind === "kicked") loseMic("다른 기기가 마이크를 가져갔습니다."); } catch {} };
-    micWS.onclose = (e) => {
-      // 열렸던 소켓의 1006 은 네트워크 끊김 → 인증 실패로 오인하지 않음(자격증명 유지)
-      if (e.code === 1008 || (!micOpened && e.code === 1006)) { localStorage.removeItem(ADMIN_KEY); showLogin(); loseMic("인증 실패 — 다시 로그인하세요."); }
-      else if (micOn) loseMic("마이크 연결이 종료되었습니다.");
-    };
-    micStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
-    ensureAudio();   // 재생과 같은 AudioContext 공유 — 마이크 정지가 재생을 안 끊게(iOS)
-    const srcNode = audioCtx.createMediaStreamSource(micStream);
-    micNode = audioCtx.createScriptProcessor(4096, 1, 1);
-    srcNode.connect(micNode); micNode.connect(audioCtx.destination);   // 출력은 무음(echo 없음)
-    await requestWakeLock();
-    micNode.onaudioprocess = (ev) => {
-      const inp = ev.inputBuffer.getChannelData(0);
-      if (!micWS || micWS.readyState !== 1) return;
-      micWS.send(floatToInt16(downsample(inp, audioCtx.sampleRate)).buffer);
-    };
-  }
-  function micStop() {
-    try { if (micWS && micWS.readyState === 1) micWS.send(JSON.stringify({ kind: "mic_stop" })); } catch {}
-    if (wakeLock) { try { wakeLock.release(); } catch {} wakeLock = null; }
-    if (micNode) { micNode.disconnect(); micNode.onaudioprocess = null; micNode = null; }
-    if (micStream) { micStream.getTracks().forEach((t) => t.stop()); micStream = null; }
-    // audioCtx 는 닫지 않음(재생 유지). iOS 가 마이크 정지로 일시중단했으면 재개.
-    if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
-    if (micWS) { try { micWS.close(); } catch {} micWS = null; }
+  // ---- 마이크 캡처 객체: 단일 진입점 apply() + generation 가드 ----
+  function createMic(deps) {
+    let ws = null, node = null, stream = null, wakeLock = null;
+    let gen = 0, capturing = false;
+
+    function _teardownAudio() {
+      if (node) { try { node.disconnect(); } catch {} node.onaudioprocess = null; node = null; }
+      if (stream) { try { stream.getTracks().forEach((t) => t.stop()); } catch {} stream = null; }
+    }
+    function _teardownSocket(sendStop) {
+      if (ws) {
+        if (sendStop) { try { if (ws.readyState === 1) ws.send(JSON.stringify({ kind: "mic_stop" })); } catch {} }
+        try { ws.close(); } catch {}
+        ws = null;
+      }
+    }
+    function _releaseWakeLock() {
+      if (wakeLock) { try { wakeLock.release(); } catch {} wakeLock = null; }
+    }
+    async function _acquireWakeLock(myGen) {
+      try {
+        if ("wakeLock" in navigator) {
+          const wl = await navigator.wakeLock.request("screen");
+          if (myGen !== gen) { try { wl.release(); } catch {} return; }
+          wakeLock = wl;
+          wakeLock.addEventListener("release", () => { wakeLock = null; });
+        }
+      } catch {}
+    }
+
+    async function _start() {
+      const myGen = ++gen;
+      capturing = true;
+      const pw = deps.getPw();
+      if (!pw) { deps.onLost("auth"); return; }
+      _teardownSocket(false);
+      const proto = location.protocol === "https:" ? "wss:" : "ws:";
+      ws = new WebSocket(`${proto}//${deps.host}/mic/${encodeURIComponent(deps.name)}?token=${encodeURIComponent(pw)}`);
+      ws.binaryType = "arraybuffer";
+      let opened = false;
+      ws.onopen = () => { if (myGen !== gen) return; opened = true; ws.send(JSON.stringify({ kind: "mic_start" })); };
+      ws.onmessage = (e) => { if (myGen !== gen) return; try { if (JSON.parse(e.data).kind === "kicked") deps.onLost("kicked"); } catch {} };
+      ws.onclose = (e) => {
+        if (myGen !== gen) return;
+        if (e.code === 1008 || (!opened && e.code === 1006)) deps.onLost("auth");
+        else deps.onLost("closed");
+      };
+      let s;
+      try {
+        s = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+      } catch (err) {
+        if (myGen === gen) deps.onLost("mic-permission");
+        return;
+      }
+      if (myGen !== gen) { try { s.getTracks().forEach((t) => t.stop()); } catch {} return; }
+      stream = s;
+      deps.ensureAudio();
+      const ctx = deps.getAudioCtx();
+      const srcNode = ctx.createMediaStreamSource(stream);
+      node = ctx.createScriptProcessor(4096, 1, 1);
+      srcNode.connect(node); node.connect(ctx.destination);
+      await _acquireWakeLock(myGen);
+      node.onaudioprocess = (ev) => {
+        if (myGen !== gen) return;
+        if (!ws || ws.readyState !== 1) return;
+        ws.send(deps.floatToInt16(deps.downsample(ev.inputBuffer.getChannelData(0), ctx.sampleRate)).buffer);
+      };
+    }
+
+    function _stop() {
+      gen++;
+      capturing = false;
+      _teardownAudio();
+      _teardownSocket(true);
+      _releaseWakeLock();
+      const ctx = deps.getAudioCtx();
+      if (ctx && ctx.state === "suspended") ctx.resume();
+    }
+
+    function apply() {
+      const want = deps.shouldCapture();
+      if (want && !capturing) _start();
+      else if (!want && capturing) _stop();
+    }
+
+    document.addEventListener("visibilitychange", () => {
+      if (capturing && wakeLock === null && document.visibilityState === "visible") _acquireWakeLock(gen);
+    });
+
+    return { apply, isCapturing: () => capturing };
   }
   // ---- 제어 채널(웹 → jarvis) one-shot 전송 ----
   function sendControl(obj) {
@@ -519,23 +564,13 @@
     sendControl({ kind: "meeting_stop" });
   });
   // ---- 회의 입력 소스 토글 (검정=시스템 / 붉은=폰 — 폰이면 폰 마이크 즉시 스트리밍) ----
-  $("mic-src-toggle").addEventListener("click", async () => {
+  $("mic-src-toggle").addEventListener("click", () => {
     if (!getPw()) { showLogin(); return; }
     ensureAudio();
-    if (micSource === "remote") {
-      // 폰 → 시스템: 스트리밍 중단
-      sendControl({ kind: "mic_system" });
-      if (micOn) { micStop(); micOn = false; }
-      micSource = "system";
-      $("mic-src-toggle").classList.remove("active");
-    } else {
-      // 시스템 → 폰: 폰 마이크 스트리밍 시작 후 소스 전환
-      try { if (!micOn) { await micStart(); micOn = true; } }
-      catch (e) { alert("마이크 권한 실패: " + e.message); return; }
-      sendControl({ kind: "mic_phone" });
-      micSource = "remote";
-      $("mic-src-toggle").classList.add("active");
-    }
+    micSource = (micSource === "remote") ? "system" : "remote";
+    $("mic-src-toggle").classList.toggle("active", micSource === "remote");
+    sendControl({ kind: micSource === "remote" ? "mic_phone" : "mic_system" });
+    mic.apply();
   });
   // ---- + 기능 메뉴 ----
   $("dock-plus").addEventListener("click", (e) => {
@@ -577,28 +612,33 @@
 
   // ---- 음성 토글 (핸즈프리: 마이크 ON + 즉시 청취, 타임아웃 없음) ----
   let voiceOn = false;
-  $("voice-toggle").addEventListener("click", async () => {
+  $("voice-toggle").addEventListener("click", () => {
     const pw = getPw();
     if (!pw) { showLogin(); return; }
     ensureAudio();
     voiceOn = !voiceOn;
     $("voice-toggle").classList.toggle("active", voiceOn);
-    if (voiceOn) {
-      if (!micOn) {
-        try { await micStart(); micOn = true; }
-        catch (e) {
-          alert("마이크 권한 실패: " + e.message);
-          voiceOn = false; $("voice-toggle").classList.remove("active"); return;
-        }
-      }
-      sendControl({ kind: "listen_start" });
-    } else {
-      sendControl({ kind: "listen_stop" });
-      if (micOn) { micStop(); micOn = false; }
-    }
+    sendControl({ kind: voiceOn ? "listen_start" : "listen_stop" });
+    mic.apply();
   });
 
   // ---- 초기화 ----
+  function onMicLost(reason) {
+    if (curView() === "home") { voiceOn = false; $("voice-toggle").classList.remove("active"); }
+    else { micSource = "system"; $("mic-src-toggle").classList.remove("active"); }
+    mic.apply();
+    if (reason === "auth") { localStorage.removeItem(ADMIN_KEY); showLogin(); }
+    else if (reason === "mic-permission") alert("마이크 권한 실패 — 권한을 허용해주세요.");
+  }
+
+  const mic = createMic({
+    getPw, host: location.host, name,
+    ensureAudio, getAudioCtx: () => audioCtx,
+    floatToInt16, downsample,
+    shouldCapture: () => (curView() === "home" && voiceOn) || (curView() === "meeting" && micSource === "remote"),
+    onLost: onMicLost,
+  });
+
   setView("home");
   if (getPw()) { hideLogin(); connect(); } else { showLogin(); }
 })();
