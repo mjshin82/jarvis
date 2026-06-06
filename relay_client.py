@@ -47,6 +47,7 @@ class RelayClient:
         self._ws = None
         self._connected = asyncio.Event()   # 한 번이라도 연결되면 set
         self.web_viewer_count = 0   # DO 가 통지한 owner 뷰어 수 (TTS 라우팅용)
+        self.on_archive_request = None   # DO → archive_request 콜백(설정 시 호출)
 
     # --- public API ---
 
@@ -153,6 +154,11 @@ class RelayClient:
             return
         if m.get("kind") == "viewers":
             self.web_viewer_count = int(m.get("count") or 0)
+        elif m.get("kind") == "archive_request" and self.on_archive_request:
+            try:
+                self.on_archive_request(m)
+            except Exception as e:
+                self.on_log(f"[relay] archive_request 처리 오류: {e}")
 
     async def _send_loop(self, ws) -> None:
         while not self._stop.is_set():

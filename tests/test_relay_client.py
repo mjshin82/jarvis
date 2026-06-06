@@ -1,5 +1,6 @@
 # tests/test_relay_client.py
 import asyncio
+import json
 import struct
 
 from relay_client import RelayClient
@@ -78,3 +79,22 @@ def test_emit_omits_lang_when_empty():
     rc = _rc()
     rc.emit("source", "안녕")
     assert rc._queue.get_nowait() == {"kind": "source", "text": "안녕"}
+
+
+def test_handle_inbound_archive_request_calls_callback():
+    rc = _rc()
+    got = []
+    rc.on_archive_request = lambda m: got.append(m)
+    rc._handle_inbound(json.dumps({"kind": "archive_request", "text": "{}"}))
+    assert len(got) == 1 and got[0]["kind"] == "archive_request"
+
+
+def test_handle_inbound_archive_request_no_callback_safe():
+    rc = _rc()
+    rc._handle_inbound(json.dumps({"kind": "archive_request", "text": "{}"}))  # on_archive_request=None → no crash
+
+
+def test_handle_inbound_viewers_still_works():
+    rc = _rc()
+    rc._handle_inbound(json.dumps({"kind": "viewers", "count": 3}))
+    assert rc.web_viewer_count == 3
