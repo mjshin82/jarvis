@@ -24,6 +24,7 @@ import config
 import coach
 import wordbook
 import settings
+from realtime_stt import RealtimeSTTAdapter, to_pcm16
 
 
 # --- 회의 메타 입력 흐름 ---
@@ -93,12 +94,11 @@ class MeetingSession:
         self.model = model
         self.realtime_model = realtime_model
         self.language = language
-        self.recorder = None
+        self._rt = None         # RealtimeSTT 폴백(어댑터)
         self._stt = None        # 스트리밍 STT 백엔드(Gladia)
         self._loop = None
         self._final_q: asyncio.Queue[str | None] | None = None
         self._consumer_task: asyncio.Task | None = None
-        self._listen_task: asyncio.Task | None = None
         self._partial_last = ""
         # 외부 listener (예: 웹 중계). _emit 의 fan-out 대상.
         self._listeners: list = []
@@ -150,15 +150,14 @@ class MeetingSession:
             self._tx_label = f"local ({self._tx_model})"
 
     def feed_block(self, block) -> None:
-        """MicRouter tap 이 매 블록 호출 — float32 [-1,1] 16kHz → int16 PCM 으로
-        활성 STT 백엔드(Gladia/RealtimeSTT)에 주입."""
-        if self._stt is None and self.recorder is None:
+        """MicRouter tap 이 매 블록 호출 — float32 → int16 PCM 으로 활성 STT 백엔드 주입."""
+        if self._stt is None and self._rt is None:
             return
-        pcm16 = (np.clip(block, -1.0, 1.0) * 32767).astype(np.int16).tobytes()
+        pcm16 = to_pcm16(block)
         if self._stt is not None:
             self._stt.feed_pcm(pcm16)
         else:
-            self.recorder.feed_audio(pcm16, 16000)
+            self._rt.feed_pcm16(pcm16)
 
     async def start(self) -> None:
         self._loop = asyncio.get_running_loop()
@@ -174,34 +173,19 @@ class MeetingSession:
                     on_partial=self._stt_partial, on_final=self._stt_final, on_log=self.log,
                 )
                 await self._stt.start()
-                self.recorder = None
                 self.log(f"🎤 회의 STT: Gladia ({config.MEET_GLADIA_MODEL}, {config.MEET_GLADIA_LANGUAGES})")
             except Exception as e:
                 self._stt = None
                 self.log(f"Gladia 연결 실패 — 로컬 STT 폴백: {e}")
 
         if self._stt is None:
-            from RealtimeSTT import AudioToTextRecorder   # 회의 진입 시에만 import
             wb_prompt = wordbook.load_initial_prompt(path=wordbook.MEET_PATH)
-            rec_kwargs = dict(
-                model=self.model,
-                realtime_model_type=self.realtime_model,
-                enable_realtime_transcription=True,
-                on_realtime_transcription_update=self._on_partial,
-                language=self.language,
-                initial_prompt=wb_prompt,
-                initial_prompt_realtime=wb_prompt,
-                spinner=False,
-                post_speech_silence_duration=0.7,
-                silero_sensitivity=0.4,
-                webrtc_sensitivity=3,
-                device="cpu",
-                compute_type="int8",
-                level=30,   # WARNING 만
+            self._rt = RealtimeSTTAdapter(
+                on_partial=self._stt_partial, on_final=self._stt_final,
+                model=self.model, realtime_model=self.realtime_model, language=self.language,
+                initial_prompt=wb_prompt, on_log=self.log,
             )
-            rec_kwargs["use_microphone"] = False   # jarvis 가 feed_block 으로 먹인다
-            self.recorder = AudioToTextRecorder(**rec_kwargs)
-            self._listen_task = asyncio.create_task(self._listen_loop())
+            await self._rt.start()
 
         # 번역기 + final 소비자는 두 백엔드 공통
         self._setup_translator()
@@ -209,18 +193,12 @@ class MeetingSession:
         self.log(f"🎤 회의 모드 시작 (번역: {self._tx_label}). 끝내려면 /stop.")
 
     async def stop(self) -> None:
-        if self._listen_task and not self._listen_task.done():
-            self._listen_task.cancel()
+        if self._rt is not None:
             try:
-                await self._listen_task
-            except (asyncio.CancelledError, Exception):
-                pass
-        if self.recorder is not None:
-            try:
-                self.recorder.shutdown()
+                await self._rt.close()
             except Exception:
                 pass
-            self.recorder = None
+            self._rt = None
         if self._stt is not None:
             try:
                 await self._stt.close()
@@ -259,46 +237,6 @@ class MeetingSession:
         """스트리밍 STT 발화 종료 — 기존 final 큐로(→ source + 번역)."""
         if self._final_q is not None:
             self._final_q.put_nowait((text or "").strip())
-
-    def _on_partial(self, text: str):
-        """RealtimeSTT 스레드에서 호출. 콘솔 status + listener fan-out 모두 수행.
-        prompt_toolkit 호출/asyncio.create_task 는 메인 루프 스레드에서만 안전 →
-        call_soon_threadsafe 로 위탁."""
-        text = (text or "").strip()
-        if not text or text == self._partial_last:
-            return
-        self._partial_last = text
-        try:
-            # 메인 루프에 통합 emit 위탁 ('partial' 은 _emit 안에서 콘솔 출력 X,
-            # listener 로만 흘러감 — RelayClient → meeting-web viewer 의 📝 영역)
-            self._loop.call_soon_threadsafe(self._emit, "partial", text)
-        except Exception:
-            pass
-        # 콘솔 status 도 같이 갱신 (자비스 콘솔 입력 박스 위 스피너 영역)
-        try:
-            self._loop.call_soon_threadsafe(self.set_status, f"📝 {text[:80]}")
-        except Exception:
-            pass
-
-    async def _listen_loop(self):
-        """recorder.text(cb) 는 블로킹 → asyncio.to_thread 로 감싼다.
-        한 번 호출에 한 발화. 끝나면 텍스트가 콜백으로 들어옴."""
-        try:
-            while True:
-                # 콜백 안에서 큐에 넣음 — 스레드 안전
-                def _final_cb(t):
-                    try:
-                        self._loop.call_soon_threadsafe(self._final_q.put_nowait, (t or "").strip())
-                    except Exception:
-                        pass
-                await asyncio.to_thread(self.recorder.text, _final_cb)
-        except asyncio.CancelledError:
-            return
-        except Exception as ex:
-            try:
-                self.log(f"[meet] listen loop error: {ex}")
-            except Exception:
-                pass
 
     def _emit(self, kind: str, text: str) -> None:
         """회의 이벤트를 콘솔 + 등록된 listener 들로 fan-out.
