@@ -4,7 +4,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>회의 자막</title>
+<title data-i18n="title">회의 자막</title>
 <link rel="icon" type="image/png" href="/icon.png" />
 <style>
   :root {
@@ -160,25 +160,26 @@ if(__exports != exports)module.exports = exports;return module.exports}));
 //# sourceMappingURL=marked.umd.js.map
 
 </script>
+<script src="/i18n.js"></script>
 </head>
 <body>
   <div id="gate">
     <div class="gate-box">
-      <div class="gate-title">🔒 회의 자막 입장</div>
-      <input id="gate-pw" type="password" placeholder="비번" />
-      <button id="gate-go">입장</button>
+      <div class="gate-title" data-i18n="gate.title">🔒 회의 자막 입장</div>
+      <input id="gate-pw" type="password" placeholder="비번" data-i18n-ph="gate.pwPlaceholder" />
+      <button id="gate-go" data-i18n="gate.enter">입장</button>
       <div id="gate-err"></div>
     </div>
   </div>
   <header>
     <img class="app-icon" src="/icon.png" alt="" />
-    <div class="title" id="title">회의 자막</div>
+    <div class="title" id="title" data-i18n="header.defaultTitle">회의 자막</div>
     <div id="conn">···</div>
   </header>
   <div id="view-tabs" class="hidden"></div>
   <div id="summary-body" class="md hidden"></div>
   <main id="log"></main>
-  <div class="lockbar" id="lockbar">↓ 새 자막 보기</div>
+  <div class="lockbar" id="lockbar" data-i18n="lockbar.newCaptions">↓ 새 자막 보기</div>
 <script>
 (() => {
   const _parts = location.pathname.split("/").filter(Boolean);
