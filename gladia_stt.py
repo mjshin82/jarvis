@@ -5,6 +5,7 @@ import asyncio
 import json
 
 import requests
+from ws_backoff import reconnect_loop
 
 try:
     import websockets
@@ -94,23 +95,7 @@ class GladiaSTT:
                 pass
 
     async def _run(self):
-        backoff = 0.5
-        while not self._stop.is_set():
-            try:
-                await self._connect_once()
-                backoff = 0.5
-            except asyncio.CancelledError:
-                return
-            except Exception as e:
-                self.on_log(f"[gladia] 끊김/실패: {e} — {backoff:.1f}s 후 재시도")
-            if self._stop.is_set():
-                return
-            try:
-                await asyncio.wait_for(self._stop.wait(), timeout=backoff)
-                return
-            except asyncio.TimeoutError:
-                pass
-            backoff = min(backoff * 2, 8.0)
+        await reconnect_loop(self._connect_once, self._stop, self.on_log, label="gladia")
 
     async def _connect_once(self):
         resp = await asyncio.to_thread(self._init_session)

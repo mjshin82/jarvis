@@ -18,6 +18,8 @@ from dataclasses import asdict
 from typing import Any
 from urllib.parse import quote
 
+from ws_backoff import reconnect_loop
+
 try:
     import websockets
     from websockets.exceptions import ConnectionClosed
@@ -130,24 +132,8 @@ class RelayClient:
         return f"{self.base_url}/publish/{key}"
 
     async def _run(self) -> None:
-        """sender 메인 루프. 끊기면 백오프 후 재연결. _stop 신호 받으면 종료."""
-        backoff = 0.5
-        while not self._stop.is_set():
-            try:
-                await self._connect_once()
-                backoff = 0.5   # 성공했으니 리셋
-            except asyncio.CancelledError:
-                return
-            except Exception as e:
-                self.on_log(f"[relay] 연결 끊김/실패: {e} — {backoff:.1f}s 후 재시도")
-            if self._stop.is_set():
-                return
-            try:
-                await asyncio.wait_for(self._stop.wait(), timeout=backoff)
-                return   # stop signal
-            except asyncio.TimeoutError:
-                pass
-            backoff = min(backoff * 2, 8.0)
+        """sender 메인 루프. 끊기면 백오프 재연결, _stop 시 종료(공용 헬퍼)."""
+        await reconnect_loop(self._connect_once, self._stop, self.on_log, label="relay")
 
     async def _send_item(self, ws, item) -> None:
         if isinstance(item, (bytes, bytearray)):
