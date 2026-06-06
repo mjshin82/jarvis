@@ -70,3 +70,26 @@ def test_archive_response_null_summary(tmp_path):
                 "title": "t", "started_at": "", "ended_at": "", "transcript": []})
     r = archive_response(store.get("m1"), "pw", 3)   # summary 아직 NULL
     assert r["ok"] is True and r["summaries"] == {}
+
+
+def test_recent_orders_desc_and_limits(tmp_path):
+    from meeting_store import MeetingStore
+    store = MeetingStore(str(tmp_path / "m.db"))
+    for i, ts in enumerate(["2026-06-01T10:00:00", "2026-06-03T10:00:00", "2026-06-02T10:00:00"]):
+        store.save({"id": f"m{i}", "password_hash": "h", "title": f"T{i}",
+                    "started_at": ts, "ended_at": ts, "transcript": []})
+    rows = store.recent(2)
+    assert [r["id"] for r in rows] == ["m1", "m2"]      # 최신순(06-03, 06-02)
+    assert set(rows[0].keys()) == {"id", "title", "started_at", "ended_at"}
+
+
+def test_archive_response_admin_bypasses_pw(tmp_path):
+    import hashlib
+    from meeting_store import MeetingStore, archive_response
+    store = MeetingStore(str(tmp_path / "m.db"))
+    store.save({"id": "m1", "password_hash": hashlib.sha256(b"pw").hexdigest(),
+                "title": "주간", "started_at": "s", "ended_at": "e",
+                "transcript": [{"ts": "t", "source": "hi", "translations": {}}]})
+    r = archive_response(store.get("m1"), "WRONG", 9, admin=True)
+    assert r["ok"] is True and r["title"] == "주간"
+    assert archive_response(None, "x", 1, admin=True) == {"req": 1, "ok": False}

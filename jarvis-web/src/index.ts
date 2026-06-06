@@ -17,6 +17,7 @@ import { MeetingDO } from "./meeting_do";
 // HTML 을 텍스트로 번들. wrangler 가 esbuild loader 로 처리.
 import APP_HTML from "./static/app.html";
 import VIEWER_HTML from "./static/viewer.html";
+import LIST_HTML from "./static/list.html";
 import ICON_PNG from "./static/icon.png";
 
 export { MeetingDO };
@@ -82,11 +83,11 @@ app.get("/control-recv/:key", async (c) => {
 
 app.get("/watch/:key", async (c) => {
   if (c.req.header("Upgrade") !== "websocket") return c.text("expected websocket", 426);
-  return forwardToDO(c.env, c.req.param("key"), "watch", c.req.raw);
+  return forwardToDO(c.env, c.req.param("key"), "watch", c.req.raw, requireAdmin(c));
 });
 
 app.get("/:name/meeting", (c) => {
-  return new Response(VIEWER_HTML, {
+  return new Response(LIST_HTML, {
     headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
   });
 });
@@ -121,12 +122,14 @@ function checkSecret(c: any, expected: string): boolean {
   return !!tok && !!expected && tok === expected;
 }
 
-function forwardToDO(env: Env, key: string, role: "publish" | "subscribe" | "mic" | "mic-recv" | "control" | "control-recv" | "watch", original: Request): Promise<Response> {
+function forwardToDO(env: Env, key: string, role: "publish" | "subscribe" | "mic" | "mic-recv" | "control" | "control-recv" | "watch", original: Request, admin = false): Promise<Response> {
   const id = env.MEETING_DO.idFromName(key);
   const stub = env.MEETING_DO.get(id);
   // DO 가 라우팅에 활용할 내부 경로
   const internalUrl = new URL(original.url);
   internalUrl.pathname = `/__do/${role}/${encodeURIComponent(key)}`;
+  internalUrl.searchParams.delete("admin");   // 클라이언트가 admin 위조 못하게 — Worker 만 부여
+  if (admin) internalUrl.searchParams.set("admin", "1");
   const req = new Request(internalUrl.toString(), original);
   return stub.fetch(req);
 }

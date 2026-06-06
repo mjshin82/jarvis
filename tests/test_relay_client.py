@@ -98,3 +98,16 @@ def test_handle_inbound_viewers_still_works():
     rc = _rc()
     rc._handle_inbound(json.dumps({"kind": "viewers", "count": 3}))
     assert rc.web_viewer_count == 3
+
+
+def test_handle_inbound_list_request_calls_callback():
+    rc = _rc()
+    got = []
+    rc.on_list_request = lambda m: got.append(m)
+    rc._handle_inbound(json.dumps({"kind": "list_request", "text": "{}"}))
+    assert len(got) == 1 and got[0]["kind"] == "list_request"
+
+
+def test_handle_inbound_list_request_no_callback_safe():
+    rc = _rc()
+    rc._handle_inbound(json.dumps({"kind": "list_request", "text": "{}"}))  # on_list_request=None → no crash

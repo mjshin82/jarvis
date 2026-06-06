@@ -359,12 +359,27 @@ async def main():
         except Exception:
             return
         payload = archive_response(store.get(data.get("mid") or ""),
-                                   data.get("pw") or "", data.get("req"))
+                                   data.get("pw") or "", data.get("req"),
+                                   admin=bool(data.get("admin")))
         if web_pub is not None:
             web_pub.emit("archive_response", json.dumps(payload, ensure_ascii=False))
 
     if web_pub is not None:
         web_pub.on_archive_request = _serve_archive
+
+    def _serve_list(msg):
+        """DO → list_request: 최근 회의 20개 회신(관리자 전용 — DO 가 admin 검증)."""
+        try:
+            data = json.loads(msg.get("text") or "{}")
+        except Exception:
+            return
+        meetings = store.recent(20)
+        if web_pub is not None:
+            web_pub.emit("list_response", json.dumps(
+                {"req": data.get("req"), "ok": True, "meetings": meetings}, ensure_ascii=False))
+
+    if web_pub is not None:
+        web_pub.on_list_request = _serve_list
 
     def _save_meeting(record):
         """종료 시 즉시 저장 → 트랜스크립트 있으면 백그라운드 요약 후 갱신."""
