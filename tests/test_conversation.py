@@ -321,6 +321,25 @@ def test_meeting_setup_two_phase_then_input():
     asyncio.run(run())
 
 
+def test_meeting_setup_empty_accepts_defaults():
+    """회귀: 회의 설정 단계에서 빈 Enter(Enter=기본)가 단계를 넘기고 기본값으로 시작한다."""
+    from live_translate import MeetingSetup
+    async def run():
+        sess = FakeSession()
+        setup = MeetingSetup(default_my_name="민준")
+        c = make_controller(make_setup=lambda: setup, make_meeting=lambda meta: sess)
+        await c.start_meeting(interactive=True)
+        assert c.meeting_phase is MeetingPhase.SETUP
+        await c.on_text("")                      # title 단계 Enter=기본
+        assert c.meeting_phase is MeetingPhase.SETUP   # 아직 vocabulary 단계
+        await c.on_text("")                      # vocabulary 단계 Enter=기본 → 시작
+        assert c.meeting_phase is MeetingPhase.LIVE
+        assert sess.started is True
+        assert setup.meta.title == "회의"
+        assert setup.meta.vocabulary == ["Jarvis", "민준"]
+    asyncio.run(run())
+
+
 def test_request_stop_cancels_text_response_in_idle():
     async def run():
         c = make_controller()

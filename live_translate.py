@@ -206,6 +206,7 @@ class MeetingSession:
         # 번역기 + final 소비자는 두 백엔드 공통
         self._setup_translator()
         self._consumer_task = asyncio.create_task(self._consume_finals())
+        self.log(f"🎤 회의 시작: {self.meta.title or '회의'}")
         self.log(f"🎤 회의 모드 시작 (번역: {self._tx_label}). 끝내려면 /stop.")
 
     async def stop(self) -> None:

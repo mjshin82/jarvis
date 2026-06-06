@@ -360,6 +360,7 @@ async def main():
     console.log("🗣️ 스트리밍 STT 준비됨 (호출어 후 실시간 인식)")
 
     console.set_escape_handler(on_escape)   # Esc → 진행 응답 취소
+    console.set_empty_submit_allowed(controller.in_meeting_setup)   # 회의 설정 단계 Enter=기본
     _restore = runtime_state.load_mode()
     if _restore == "meeting":
         console.log("🎤 이전 회의 모드를 복구합니다.")

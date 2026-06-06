@@ -48,6 +48,7 @@ _app: Application | None = None
 _app_task: asyncio.Task | None = None
 _started = False
 _on_escape = None   # Esc 키 콜백 (외부에서 set_escape_handler 로 등록)
+_empty_submit_ok = None   # 빈 Enter 제출 허용 여부 predicate (회의 설정 'Enter=기본')
 _queue_items: list[str] = []   # 입력 박스 위에 표시할 대기 입력들
 _status: str | None = None     # 진행 표시(스피너) 텍스트. None 이면 숨김
 _spinner_task: asyncio.Task | None = None
@@ -59,6 +60,13 @@ def set_escape_handler(callback) -> None:
     """Esc 키가 눌렸을 때 호출될 함수 등록. 입력 박스가 비어있을 때만 발화."""
     global _on_escape
     _on_escape = callback
+
+
+def set_empty_submit_allowed(predicate) -> None:
+    """빈 입력(Enter)도 제출로 받을지 결정하는 predicate 등록. True 반환 시 빈 문자열을
+    큐에 넣는다(회의 설정 단계의 'Enter=기본'). 평소엔 빈 Enter 는 무시."""
+    global _empty_submit_ok
+    _empty_submit_ok = predicate
 
 
 def set_queue_display(items: list[str]) -> None:
@@ -170,6 +178,9 @@ def _build_app() -> tuple[Application, Buffer]:
         submitted = buffer.text.strip()
         if not submitted:
             buffer.text = ""
+            # 회의 설정 등 빈 Enter 를 '기본값 수락'으로 받아야 하는 단계에서만 빈 제출.
+            if _empty_submit_ok is not None and _empty_submit_ok() and _queue is not None:
+                _queue.put_nowait("")
             return
         buffer.append_to_history()
         buffer.text = ""

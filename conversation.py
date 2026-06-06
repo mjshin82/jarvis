@@ -380,10 +380,7 @@ class ConversationController:
             await self._set_idle()
             self.log("🎤 회의 시작을 취소했어요.")
             return
-        if not stripped:
-            self.log(f"   {setup.prompt}")
-            return
-        setup.submit(stripped)
+        setup.submit(stripped)   # 빈 입력은 해당 단계 기본값 수락(Enter=기본).
         if not setup.done:
             self.log(f"   {setup.prompt}")
             return
