@@ -29,6 +29,7 @@ import console
 import commands
 import json
 import settings
+import languages
 import coach
 import runtime_state
 from mode_intent import mode_intent
@@ -112,8 +113,10 @@ async def main():
                 if not vocab:
                     vocab = ["Jarvis", config.USER_NAME]
                 password = (msg.get("password") or "").strip()
+                langs = languages.normalize(msg.get("languages") or [])
                 await controller.start_meeting(meta=MeetingMeta(
-                    my_name=config.USER_NAME, title=title, vocabulary=vocab, password=password))
+                    my_name=config.USER_NAME, title=title, vocabulary=vocab,
+                    password=password, languages=langs))
             elif kind == "mic_system":
                 mic.router.set_override("local")
             elif kind == "mic_phone":
@@ -359,20 +362,27 @@ async def main():
             lines = record.get("transcript") or []
             if not lines:
                 return
-            text = "\n".join(
-                (e.get("source") or "") +
-                (f" / {e.get('ko') or e.get('en')}" if (e.get("ko") or e.get("en")) else "")
-                for e in lines
-            )
-            try:
-                summary = await llm.summarize(text)
-            except Exception as e:
-                console.log(f"회의 요약 실패: {e}")
-                return
-            if summary:
+            def _line_text(e):
+                src = e.get("source") or ""
+                tx = " / ".join(v for v in (e.get("translations") or {}).values() if v)
+                return src + (f" / {tx}" if tx else "")
+            text = "\n".join(_line_text(e) for e in lines)
+            langs = record.get("languages") or ["ko"]
+            summaries = {}
+            for lc in langs:
                 try:
-                    await asyncio.to_thread(store.set_summary, record["id"], summary)
-                    console.log(f"📝 회의 요약 저장됨 (ID {record['id']})")
+                    s = await llm.summarize(text, languages.NAMES.get(lc, lc))
+                except Exception as e:
+                    console.log(f"회의 요약 실패({lc}): {e}")
+                    continue
+                if s:
+                    summaries[lc] = s
+            if summaries:
+                try:
+                    await asyncio.to_thread(
+                        store.set_summary, record["id"],
+                        json.dumps(summaries, ensure_ascii=False))
+                    console.log(f"📝 회의 요약 저장됨 (ID {record['id']}, {','.join(summaries)})")
                 except Exception as e:
                     console.log(f"요약 저장 실패: {e}")
         asyncio.create_task(_run())

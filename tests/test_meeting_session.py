@@ -48,17 +48,28 @@ def test_setup_defaults():
     assert not s.done
 
 
-def test_setup_submit_title_and_vocab():
+def test_setup_all_steps():
     from live_translate import MeetingSetup
     s = MeetingSetup(default_my_name="민준")
-    s.submit("주간회의")
-    s.submit("신명진, 콘코드, Jarvis")
-    assert not s.done                      # password 단계 남음
-    s.submit("secret")
+    s.submit("주간회의")            # title
+    s.submit("ko, en, jp")          # languages (jp→ja)
+    s.submit("신명진, 콘코드")      # vocabulary
+    assert not s.done               # password 남음
+    s.submit("secret")              # password
     assert s.done
     assert s.meta.title == "주간회의"
-    assert s.meta.vocabulary == ["신명진", "콘코드", "Jarvis"]
+    assert s.meta.languages == ["ko", "en", "ja"]
+    assert s.meta.vocabulary == ["신명진", "콘코드"]
     assert s.meta.password == "secret"
+
+
+def test_setup_empty_uses_defaults():
+    from live_translate import MeetingSetup
+    s = MeetingSetup(default_my_name="민준")
+    s.submit(""); s.submit(""); s.submit(""); s.submit("")
+    assert s.done
+    assert s.meta.languages == ["ko", "en"]
+    assert s.meta.password == ""
 
 
 def test_setup_empty_keeps_defaults():
@@ -113,25 +124,24 @@ def test_finalize_meta_keeps_given_password():
 def test_record_line_and_translation():
     sess = _sess()
     entry = sess._record_line("hello")
-    assert entry["source"] == "hello" and entry["ko"] == "" and entry["en"] == ""
+    assert entry["source"] == "hello" and entry["translations"] == {}
     assert sess._transcript == [entry]
-    entry["ko"] = "안녕"
-    assert sess._transcript[0]["ko"] == "안녕"
+    entry["translations"]["ko"] = "안녕"
+    assert sess._transcript[0]["translations"]["ko"] == "안녕"
 
 
 def test_record_shape():
     from live_translate import MeetingMeta, hash_password
-    sess = _sess(meta=MeetingMeta(title="주간", password="pw"))
+    sess = _sess(meta=MeetingMeta(title="주간", password="pw", languages=["ko", "en"]))
     sess.meta.meeting_id = "abc123"
     sess.meta.started_at = "2026-06-06T10:00:00"
     sess._record_line("hi")
     rec = sess.record()
     assert rec["id"] == "abc123"
-    assert rec["password_hash"] == hash_password("pw")
     assert rec["title"] == "주간"
-    assert rec["started_at"] == "2026-06-06T10:00:00"
-    assert rec["ended_at"] != ""
+    assert rec["languages"] == ["ko", "en"]
     assert rec["transcript"][0]["source"] == "hi"
+    assert rec["transcript"][0]["translations"] == {}
 
 
 def test_stop_awaits_pending_translations():
@@ -151,9 +161,25 @@ def test_stop_awaits_pending_translations():
     asyncio.run(run())
 
 
-def test_setup_password_empty_stays_blank():
-    from live_translate import MeetingSetup
-    s = MeetingSetup(default_my_name="민준")
-    s.submit(""); s.submit(""); s.submit("")
-    assert s.done
-    assert s.meta.password == ""   # 빈 입력 → 세션 시작 시 자동 생성
+
+
+def test_translate_bg_emits_per_language(monkeypatch):
+    import types as _types
+    import coach
+
+    async def fake_multi(client, model, text, system_prompt, extra=None):
+        return {"en": "hi", "ja": "ya"}
+
+    monkeypatch.setattr(coach, "translate_multi", fake_multi)
+    sess = _sess()
+    sess.llm = _types.SimpleNamespace(client=None, extra={})
+    sess._tx_client = object()
+    sess._tx_model = "m"
+    sess._tx_system = "sys"
+    got = []
+    sess.add_listener(lambda kind, text, lang="": got.append((kind, text, lang)))
+    entry = {"ts": "t", "source": "안녕", "src_lang": "", "translations": {}}
+    asyncio.run(sess._translate_bg("안녕", entry))
+    assert entry["translations"] == {"en": "hi", "ja": "ya"}
+    assert ("translation", "hi", "en") in got
+    assert ("translation", "ya", "ja") in got

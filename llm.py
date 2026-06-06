@@ -234,13 +234,14 @@ class LLM:
             cleaned = _THINK_BLOCK.sub("", full).strip()
             self.history.append({"role": "assistant", "content": cleaned or "(중단됨)"})
 
-    async def summarize(self, text: str) -> str:
-        """회의 트랜스크립트 1회 요약. 현재 백엔드 사용. mock/미설정이면 빈 문자열."""
+    async def summarize(self, text: str, lang_name: str = "Korean") -> str:
+        """회의 트랜스크립트 1회 요약(대상 언어). 현재 백엔드 사용. mock/미설정 → ""."""
         if self._mock or self.client is None or not (text or "").strip():
             return ""
         messages = [
             {"role": "system", "content":
-             "다음 회의 대화를 한국어로 간결히 요약하라. 주요 논의·결정·할 일 위주로 불릿."},
+             f"Summarize the meeting conversation concisely in {lang_name}. "
+             f"Use bullet points covering key discussion, decisions, and action items."},
             {"role": "user", "content": text},
         ]
         resp = await self.client.chat.completions.create(

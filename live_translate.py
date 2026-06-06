@@ -24,6 +24,7 @@ import config
 import coach
 import wordbook
 import settings
+import languages
 from realtime_stt import RealtimeSTTAdapter, to_pcm16
 import hashlib
 import secrets
@@ -42,6 +43,7 @@ class MeetingMeta:
     my_lang: str = ""
     title: str = ""
     vocabulary: list = field(default_factory=list)   # STT 보강 단어
+    languages: list = field(default_factory=lambda: ["ko", "en"])   # 룸 언어(정규 코드)
     meeting_id: str = ""     # 6자리 hex, 회의 시작 시 발급
     password: str = ""       # 평문(입력/자동). 표시·해시용, DB 미저장
     started_at: str = ""     # ISO8601, 회의 시작 시각
@@ -74,13 +76,14 @@ def hash_password(pw: str) -> str:
 # my_name 은 config.USER_NAME 에서 기본값, partner/my 의 언어는 LLM 이 자동 분기.
 _META_STEPS = (
     ("title", "회의 제목을 입력하세요 (Enter=기본)"),
+    ("languages", "언어 코드 — 쉼표로 (Enter=기본: ko,en)"),
     ("vocabulary", "워드북 — 쉼표로 구분 (Enter=기본: Jarvis, 이름)"),
     ("password", "비번 (Enter=자동 생성)"),
 )
 
 
 class MeetingSetup:
-    """메타 입력 진행 상태. title → vocabulary 두 단계 입력 후 done.
+    """메타 입력 진행 상태. title → languages → vocabulary → password 네 단계 입력 후 done.
     my_name 은 config.USER_NAME 으로 자동 채움."""
 
     def __init__(self, default_my_name: str = "Concode"):
@@ -103,6 +106,8 @@ class MeetingSetup:
         v = value.strip()
         if key == "title":
             self.meta.title = v or "회의"
+        elif key == "languages":
+            self.meta.languages = languages.normalize(v)   # 빈 입력 → DEFAULT(ko,en)
         elif key == "vocabulary":
             if v:
                 self.meta.vocabulary = [w.strip() for w in v.split(",") if w.strip()]
@@ -154,7 +159,7 @@ class MeetingSession:
         self._tx_tasks: set = set()           # 진행 중 번역 태스크 (종료 시 대기)
 
     def add_listener(self, callback) -> None:
-        """매 _emit 호출 시 callback(kind, text) 가 함께 불린다.
+        """매 _emit 호출 시 callback(kind, text, lang) 가 함께 불린다 (lang 은 번역 언어, 그 외엔 "").
         callback 은 동기 함수든 코루틴 함수든 OK (fire-and-forget)."""
         self._listeners.append(callback)
 
@@ -162,19 +167,9 @@ class MeetingSession:
         """DeepSeek 우선, 키 없으면 자비스 본체 LLM 로 폴백.
         시스템 프롬프트는 한 번만 빌드 — 매 호출 동일하게 보내야 캐시 히트."""
         glossary = wordbook.load_glossary_lines(path=wordbook.MEET_PATH)
-        # 메타가 있으면 컨텍스트에 양측 정보를 명시 → 번역 방향성/존중 톤 안정성↑
-        ctx_lines = [config.MEET_CONTEXT.strip()]
-        m = self.meta
-        if m.partner_name or m.my_name:
-            parts = []
-            if m.partner_name:
-                p = m.partner_name + (f" (speaks {m.partner_lang})" if m.partner_lang else "")
-                parts.append(f"Counterpart: {p}")
-            if m.my_name:
-                me = m.my_name + (f" (speaks {m.my_lang})" if m.my_lang else "")
-                parts.append(f"User: {me}")
-            ctx_lines.append(" / ".join(parts))
-        self._tx_system = coach._build_meet_system_prompt("\n".join(ctx_lines), glossary)
+        ctx = config.MEET_CONTEXT.strip()
+        self._tx_system = coach.build_multi_system_prompt(
+            languages.names(self.meta.languages), ctx, glossary)
 
         use_remote = (settings.get("llm_backend") == "deepseek"
                       and config.DEEPSEEK_API_KEY
@@ -202,7 +197,7 @@ class MeetingSession:
 
     def _record_line(self, source: str) -> dict:
         """확정 원문 1줄을 트랜스크립트에 추가하고 entry 반환(번역은 나중에 채움)."""
-        entry = {"ts": now_iso(), "source": source, "ko": "", "en": ""}
+        entry = {"ts": now_iso(), "source": source, "src_lang": "", "translations": {}}
         self._transcript.append(entry)
         return entry
 
@@ -214,6 +209,7 @@ class MeetingSession:
             "title": self.meta.title or "회의",
             "started_at": self.meta.started_at,
             "ended_at": now_iso(),
+            "languages": list(self.meta.languages),
             "transcript": list(self._transcript),
         }
 
@@ -237,14 +233,14 @@ class MeetingSession:
         if settings.get("stt_backend") == "gladia" and config.GLADIA_API_KEY:
             from gladia_stt import GladiaSTT
             try:
-                langs = [s.strip() for s in config.MEET_GLADIA_LANGUAGES.split(",") if s.strip()]
+                langs = languages.gladia_codes(self.meta.languages)
                 self._stt = GladiaSTT(
                     config.GLADIA_API_KEY, model=config.MEET_GLADIA_MODEL, languages=langs,
                     on_partial=self._stt_partial, on_final=self._stt_final, on_log=self.log,
                     vocabulary=self.meta.vocabulary,
                 )
                 await self._stt.start()
-                self.log(f"🎤 회의 STT: Gladia ({config.MEET_GLADIA_MODEL}, {config.MEET_GLADIA_LANGUAGES})")
+                self.log(f"🎤 회의 STT: Gladia ({config.MEET_GLADIA_MODEL}, {','.join(langs)})")
             except Exception as e:
                 self._stt = None
                 self.log(f"Gladia 연결 실패 — 로컬 STT 폴백: {e}")
@@ -319,29 +315,23 @@ class MeetingSession:
         if self._final_q is not None:
             self._final_q.put_nowait((text or "").strip())
 
-    def _emit(self, kind: str, text: str) -> None:
-        """회의 이벤트를 콘솔 + 등록된 listener 들로 fan-out.
-        kind: 'source' | 'translation_ko' | 'translation_en' | 'info' | 'gap' | 'partial'"""
-        # 1) 콘솔 출력 (기존)
-        prefix = {
-            "source": "🧑",
-            "translation_ko": "🌐",
-            "translation_en": "🇺🇸",
-            "info": "🎤",
-            "gap": "",
-        }.get(kind, "")
+    def _emit(self, kind: str, text: str, lang: str = "") -> None:
+        """회의 이벤트를 콘솔 + listener 들로 fan-out. translation 은 lang 동반."""
+        flags = {"ko": "🇰🇷", "en": "🇺🇸", "ja": "🇯🇵", "zh": "🇨🇳"}
+        prefix = {"source": "🧑", "info": "🎤", "gap": ""}.get(kind, "")
+        if kind == "translation":
+            prefix = flags.get(lang, "🌐")
         if kind == "gap":
             self.log("")
         elif kind == "partial":
-            pass    # 콘솔엔 partial 안 찍음 (status 영역이 따로 표시)
+            pass
         elif prefix:
             self.log(f"{prefix} {text}")
         else:
             self.log(text)
-        # 2) listener fan-out (fire-and-forget — listener 실패가 회의 막지 않게)
         for cb in self._listeners:
             try:
-                result = cb(kind, text)
+                result = cb(kind, text, lang)
                 if asyncio.iscoroutine(result):
                     asyncio.create_task(result)
             except Exception as e:
@@ -374,19 +364,16 @@ class MeetingSession:
             t.add_done_callback(self._tx_tasks.discard)
 
     async def _translate_bg(self, text: str, entry: dict | None = None):
-        """양방향 번역. 시스템 프롬프트에 워드북/맥락/few-shot 이 다 들어있고
-        매 호출마다 *정확히 동일* 하게 보내므로 DeepSeek prompt caching 히트."""
-        # local 폴백이면 ollama keep_alive 가 필요, remote 는 빈 dict
+        """룸의 나머지 모든 언어로 번역(단일 호출). 각 언어를 translation 이벤트로 emit."""
         extra = self.llm.extra if self._tx_client is self.llm.client else {}
         try:
-            out = await coach.translate_meeting(
+            out = await coach.translate_multi(
                 self._tx_client, self._tx_model, text, self._tx_system, extra=extra,
             )
         except Exception as ex:
             self.log(f"[meet] translate error: {ex}")
             return
-        if out:
-            kind = "translation_en" if coach.is_korean(text) else "translation_ko"
+        for lang, t in out.items():
             if entry is not None:
-                entry["en" if kind == "translation_en" else "ko"] = out
-            self._emit(kind, out)
+                entry["translations"][lang] = t
+            self._emit("translation", t, lang)
