@@ -985,6 +985,8 @@ Expected: 90 passed (71 기존 + 19 신규)
         await _translate_bg(audio)
 
     def _after_meeting_start(sess):
+        # 원본 _begin_meeting 의 로그/리스너 등록 재현
+        console.log(f"🎤 회의를 시작합니다. 회의 번호: {sess.meta.key}")
         if web_pub is not None:
             sess.add_listener(web_pub.emit_async)
             view_base = config.RELAY_URL.replace("wss://", "https://").replace("ws://", "http://")
@@ -1016,10 +1018,15 @@ Expected: 90 passed (71 기존 + 19 신규)
         mode_intent=mode_intent, translate_mode=MODE,
         make_setup=_make_setup, make_meeting=_make_meeting,
         after_meeting_start=_after_meeting_start, dispatch_command=_dispatch_command,
+        drain_queue=_drain_text_queue,
         fx={"wake": config.FX_WAKE, "ok": config.FX_OK},
         follow_up=config.FOLLOW_UP, listen_timeout_s=config.LISTEN_TIMEOUT_S,
     )
 ```
+
+> `drain_queue=_drain_text_queue`: 컨트롤러가 wake/translate/meeting 진입 시 대기 텍스트
+> 입력을 비우도록(원본 `trigger_wake`/`start_translate`/`start_meeting_setup` 의 `_drain_text_queue()`
+> 동작 보존). `_drain_text_queue` 는 main 에 이미 존재(330~340).
 
 > 자막 URL 은 `sess.meta.key` 를 쓴다. `MeetingSession` 이 생성자에서 받은 meta 를
 > `self.meta` 로 보관하는지 구현에서 확인하고, 없으면 `live_translate.py` 의
