@@ -18,7 +18,7 @@ import wordbook
 from search import web_search
 from music import play_music, stop_music
 from simulation import MODE
-import intents
+import music_intent
 
 # 문장 끝으로 볼 부호 (한국어/영어).
 _SENTENCE_END = re.compile(r"[.!?。…？！]\s*$|[\n]")
@@ -228,7 +228,7 @@ class LLM:
         """async generator: 완성된 문장을 하나씩 yield."""
         # Fast-path: 명백한 음악 명령은 LLM 호출 없이 곧장 도구 실행
         if self.use_tools and config.MUSIC_ENABLED:
-            intent = intents.classify(user_text)
+            intent = music_intent.classify(user_text)
             if intent:
                 async for s in self._fast_path(intent, user_text):
                     yield s

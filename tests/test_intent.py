@@ -1,5 +1,5 @@
 # tests/test_intent.py
-from intent import mode_intent
+from mode_intent import mode_intent
 
 
 def test_enter_intents():
