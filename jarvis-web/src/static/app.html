@@ -135,6 +135,11 @@
     border-top-color: var(--accent); border-radius: 50%; animation: spin 0.9s linear infinite; }
   #meeting-loading .lbl { color: var(--muted); font-size: 15px; }
   @keyframes spin { to { transform: rotate(360deg); } }
+  #mode-toast { position: fixed; top: 64px; left: 50%; transform: translateX(-50%) translateY(-8px);
+    background: var(--accent); color: #fff; padding: 8px 16px; border-radius: 999px; font-size: 14px;
+    z-index: 40; opacity: 0; pointer-events: none; transition: opacity .25s, transform .25s; box-shadow: 0 2px 10px #0005; }
+  #mode-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  @keyframes viewfade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
   #voice-toggle:disabled { opacity: 0.45; cursor: not-allowed; animation: none; }
   .hidden { display: none !important; }
 </style>
@@ -149,6 +154,7 @@
     <div class="spinner"></div>
     <div class="lbl">회의 준비 중…</div>
   </div>
+  <div id="mode-toast"></div>
 
   <header>
     <img class="app-icon" src="/icon.png" alt="" />
@@ -187,6 +193,11 @@
         <div class="sheet-label">일반 대화 STT</div>
         <label><input type="radio" name="set-conv-stt" value="gladia"> Gladia</label>
         <label><input type="radio" name="set-conv-stt" value="local"> 로컬</label>
+      </div>
+      <div class="sheet-row">
+        <div class="sheet-label">일반 대화 LLM</div>
+        <label><input type="radio" name="set-conv-llm" value="deepseek"> 딥시크</label>
+        <label><input type="radio" name="set-conv-llm" value="local"> 로컬</label>
       </div>
     </div>
   </div>
@@ -242,10 +253,20 @@
     $("title").textContent = nv === "meeting" ? meetingTitle : "Jarvis";
     $("plus-menu").classList.add("hidden");   // 뷰 전환 시 메뉴 닫기
   }
+  let modeToastTimer = null;
+  function showModeToast(text) {
+    const t = $("mode-toast");
+    t.textContent = text; t.classList.add("show");
+    clearTimeout(modeToastTimer);
+    modeToastTimer = setTimeout(() => t.classList.remove("show"), 1500);
+  }
   function showView(v) {
     const nv = (v === "meeting" ? "meeting" : "home");
     if (document.body.dataset.view === nv) return;
     setView(nv);   // URL 은 /{name} 유지 — /meeting 은 공개 뷰어
+    const el = nv === "meeting" ? $("meeting-view") : $("home-view");
+    el.style.animation = "none"; void el.offsetWidth; el.style.animation = "viewfade .25s ease";
+    showModeToast(nv === "meeting" ? "🎤 회의 모드" : "💬 일반 모드");
   }
   function curView() { return document.body.dataset.view === "meeting" ? "meeting" : "home"; }
 
@@ -627,13 +648,16 @@
     document.querySelectorAll('input[name="set-translate"]').forEach((r) => { r.checked = (r.value === s.translate_backend); });
     document.querySelectorAll('input[name="set-stt"]').forEach((r) => { r.checked = (r.value === s.stt_backend); });
     document.querySelectorAll('input[name="set-conv-stt"]').forEach((r) => { r.checked = (r.value === s.conversation_stt_backend); });
+    document.querySelectorAll('input[name="set-conv-llm"]').forEach((r) => { r.checked = (r.value === s.conversation_llm_backend); });
   }
   function curSettings() {
     const t = document.querySelector('input[name="set-translate"]:checked');
     const s = document.querySelector('input[name="set-stt"]:checked');
     const c = document.querySelector('input[name="set-conv-stt"]:checked');
+    const l = document.querySelector('input[name="set-conv-llm"]:checked');
     return { translate_backend: t ? t.value : "deepseek", stt_backend: s ? s.value : "gladia",
-             conversation_stt_backend: c ? c.value : "local" };
+             conversation_stt_backend: c ? c.value : "local",
+             conversation_llm_backend: l ? l.value : "deepseek" };
   }
   $("menu-settings").addEventListener("click", () => {
     $("plus-menu").classList.add("hidden");
