@@ -115,3 +115,36 @@ def test_feed_recognizer_echo_gate():
     now[0] = 2.0
     c._feed_recognizer(np.ones(4, dtype=np.float32))
     assert len(c.recognizer.fed) == 1    # not busy → feed
+
+
+def test_set_idle_clears_tap_and_state():
+    async def run():
+        c = make_controller()
+        c.mode = Mode.CONVERSING; c.phase = Phase.LISTENING; c._apply_tap()
+        await c._set_idle()
+        assert c.mode is Mode.IDLE and c.phase is None
+        assert c.mic.tap is None
+    asyncio.run(run())
+
+
+def test_to_listening_sets_tap_cue_and_watchdog():
+    async def run():
+        c = make_controller()
+        await c._to_listening(cue=True)
+        assert c.mode is Mode.CONVERSING and c.phase is Phase.LISTENING
+        assert c.mic.tap == c._feed_recognizer
+        assert "w.wav" in c.player.files           # cue 재생
+        assert c.watchdog is not None
+        await c._cancel(c.watchdog)                # 정리
+    asyncio.run(run())
+
+
+def test_teardown_cancels_response_when_leaving_conversing():
+    async def run():
+        c = make_controller()
+        c.mode = Mode.CONVERSING; c.phase = Phase.RESPONDING
+        async def slow(): await asyncio.sleep(10)
+        c.response = asyncio.create_task(slow())
+        await c._set_idle()                        # teardown 이 response 취소
+        assert c.response is None
+    asyncio.run(run())

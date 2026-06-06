@@ -107,3 +107,55 @@ class ConversationController:
         if self.is_output_busy():
             return
         self.recognizer.feed_block(block)
+
+    # --- 전환: teardown → 새 모드 ---
+    async def _teardown(self):
+        """현재 모드를 깨끗이 종료(자원 정리·복원). 새 모드 진입 전 항상 호출."""
+        if self.mode is Mode.CONVERSING:
+            await self._cancel(self.response); self.response = None
+            await self._cancel(self.watchdog); self.watchdog = None
+        elif self.mode is Mode.TRANSLATE:
+            self.translate_mode.end_translate()
+            await self._cancel(self.response); self.response = None
+        elif self.mode is Mode.MEETING:
+            if self.meeting_phase is MeetingPhase.LIVE and self.meeting_session is not None:
+                try:
+                    await self.meeting_session.stop()
+                except Exception as e:
+                    self.log(f"회의 종료 중 오류: {e}")
+                self.mic.restore_mode(self.saved_mic_mode)   # 회의 전 소스 복원(불변식)
+                self.set_status(None)
+                if self.web_pub is not None:
+                    self.web_pub.emit("navigate", "home")
+            self.meeting_session = None
+            self.meeting_setup = None
+            self.saved_mic_mode = None
+        self.mic.set_tap(None)
+
+    async def _set_idle(self):
+        await self._teardown()
+        self.mode = Mode.IDLE
+        self.phase = None
+        self._apply_tap()
+        self.log("\n🎙️  'Hey Jarvis' 라고 부르거나 아래에 텍스트를 입력하세요.")
+
+    async def _to_listening(self, cue=True):
+        await self._teardown()
+        self.mode = Mode.CONVERSING
+        self.phase = Phase.LISTENING
+        self._apply_tap()
+        if cue:
+            await self.player.enqueue_file(self.fx["wake"])
+        self.log("🔔 듣고 있어요…")
+        self.watchdog = asyncio.create_task(self._listen_timeout())
+
+    async def _listen_timeout(self):
+        try:
+            await asyncio.sleep(self.listen_timeout_s)
+        except asyncio.CancelledError:
+            return
+        if self.hands_free:
+            return
+        if self.mode is Mode.CONVERSING and self.phase is Phase.LISTENING:
+            self.log("\n⌛ 입력이 없어 대기 상태로 돌아갑니다.")
+            await self._set_idle()
