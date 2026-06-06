@@ -82,7 +82,7 @@ app.get("/control-recv/:key", async (c) => {
 
 app.get("/watch/:key", async (c) => {
   if (c.req.header("Upgrade") !== "websocket") return c.text("expected websocket", 426);
-  return forwardToDO(c.env, c.req.param("key"), "watch", c.req.raw);
+  return forwardToDO(c.env, c.req.param("key"), "watch", c.req.raw, requireAdmin(c));
 });
 
 app.get("/:name/meeting", (c) => {
@@ -121,12 +121,13 @@ function checkSecret(c: any, expected: string): boolean {
   return !!tok && !!expected && tok === expected;
 }
 
-function forwardToDO(env: Env, key: string, role: "publish" | "subscribe" | "mic" | "mic-recv" | "control" | "control-recv" | "watch", original: Request): Promise<Response> {
+function forwardToDO(env: Env, key: string, role: "publish" | "subscribe" | "mic" | "mic-recv" | "control" | "control-recv" | "watch", original: Request, admin = false): Promise<Response> {
   const id = env.MEETING_DO.idFromName(key);
   const stub = env.MEETING_DO.get(id);
   // DO 가 라우팅에 활용할 내부 경로
   const internalUrl = new URL(original.url);
   internalUrl.pathname = `/__do/${role}/${encodeURIComponent(key)}`;
+  if (admin) internalUrl.searchParams.set("admin", "1");
   const req = new Request(internalUrl.toString(), original);
   return stub.fetch(req);
 }
