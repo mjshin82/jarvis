@@ -32,6 +32,7 @@ export class MeetingDO {
   private lastControlNoReceiverAt = 0;
   private lastNoReceiverAt = 0;
   private lastMicSource: string | null = null;
+  private currentView: string | null = null;
   private events: RelayEvent[] = [];   // 최근 N개 (deque)
   private seq = 0;
   private meta: MeetingMeta | null = null;
@@ -125,6 +126,7 @@ export class MeetingDO {
     // navigate: 일시적 명령(상태 아님) — 현재 viewer 에게만 broadcast, replay 버퍼 미적재.
     // (append 하면 이후 접속한 viewer 가 replay 로 받아 회의가 아닐 때도 /meeting 으로 이동함)
     if (msg.kind === "navigate") {
+      this.currentView = msg.text ?? null;
       this.broadcast(this.buildEvent(msg));
       return;
     }
@@ -157,6 +159,12 @@ export class MeetingDO {
       }
       if (this.lastMicSource) {
         this.safeSend(ws, this.buildEvent({ kind: "mic_source", source: this.lastMicSource as "system" | "remote" }));
+      }
+      if (this.currentView === "meeting") {
+        this.safeSend(ws, this.buildEvent({ kind: "navigate", text: "meeting" }));
+      }
+      if (!this.publisher) {
+        this.safeSend(ws, this.buildEvent({ kind: "publisher_disconnected" }));
       }
     }
     ws.addEventListener("close", () => {
