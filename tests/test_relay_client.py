@@ -124,3 +124,21 @@ def test_handle_inbound_delete_request_calls_callback():
 def test_handle_inbound_delete_request_no_callback_safe():
     rc = _rc()
     rc._handle_inbound(json.dumps({"kind": "delete_request", "text": "{}"}))  # on_delete_request=None → no crash
+
+
+def test_emit_includes_lid_when_set():
+    rc = _rc()
+    rc.emit("translation", "hi", lang="ja", lid=3)
+    assert rc._queue.get_nowait() == {"kind": "translation", "text": "hi", "lang": "ja", "lid": 3}
+
+
+def test_emit_includes_lid_zero():
+    rc = _rc()
+    rc.emit("source", "x", lid=0)
+    assert rc._queue.get_nowait() == {"kind": "source", "text": "x", "lid": 0}
+
+
+def test_emit_omits_lid_when_none():
+    rc = _rc()
+    rc.emit("source", "안녕")
+    assert rc._queue.get_nowait() == {"kind": "source", "text": "안녕"}
