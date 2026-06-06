@@ -22,6 +22,10 @@ export type EventKind =
   | "archive_response"     // jarvis → DO: 열람 응답. text=JSON{req,ok,title,transcript,summaries}
   | "meeting_archive"      // DO → viewer: 종료 회의 기록. text=JSON{title,transcript,summaries}
   | "meeting_summary"      // jarvis → viewer: 언어별 요약(준비되면). text=JSON{mid,summaries}
+  | "list"                 // viewer(admin) → DO: 최근 회의 목록 요청
+  | "list_request"         // DO → jarvis: 목록 요청. text=JSON{req}
+  | "list_response"        // jarvis → DO: 목록 응답. text=JSON{req,ok,meetings}
+  | "meeting_list"         // DO → viewer: 목록. text=JSON{meetings}
   | "user"
   | "assistant"
   | "navigate"
