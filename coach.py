@@ -139,7 +139,7 @@ async def translate_meeting(client, model: str, text: str,
 _MEET_MULTI_TEMPLATE = """You are a professional simultaneous interpreter for a business meeting.
 Room languages: {langs}.
 Detect the language of each input utterance and translate it into ALL the OTHER room languages (exclude the source language).
-Output ONLY a JSON object mapping language code to translation, e.g. {{"en": "...", "ja": "..."}}. Use codes: ko, en, ja, zh. No commentary, no source-language key, no code fences.
+Output ONLY a JSON object whose keys are EXACTLY from this set, minus the source language's code: {codes}. Do NOT output any language outside this set. No commentary, no source-language key, no code fences.
 
 Quality rules:
 - Natural and conversational — what a fluent interpreter would actually say, not word-for-word.
@@ -153,11 +153,13 @@ Proper nouns glossary (recognize variants, output canonical form):
 {glossary}"""
 
 
-def build_multi_system_prompt(lang_names: list, context: str, glossary_lines: list) -> str:
-    """다국어 회의 번역 시스템 프롬프트. 룸 언어 고정 → 회의당 동일(캐시 히트)."""
+def build_multi_system_prompt(lang_names: list, lang_codes: list, context: str, glossary_lines: list) -> str:
+    """다국어 회의 번역 시스템 프롬프트. 룸 언어 고정 → 회의당 동일(캐시 히트).
+    lang_codes: 출력 허용 코드(룸 언어). 이 밖의 언어는 내지 말라고 명시."""
     glossary = "\n".join(f"- {l}" for l in glossary_lines) if glossary_lines else "- (none)"
     ctx = (context or "").strip() or "(general business meeting)"
-    return _MEET_MULTI_TEMPLATE.format(langs=", ".join(lang_names), context=ctx, glossary=glossary)
+    return _MEET_MULTI_TEMPLATE.format(
+        langs=", ".join(lang_names), codes=", ".join(lang_codes), context=ctx, glossary=glossary)
 
 
 def _parse_json_obj(s: str) -> dict:
