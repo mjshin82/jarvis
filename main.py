@@ -117,6 +117,7 @@ async def main():
                     web_pub.emit("settings", json.dumps(settings.current()))
             elif kind == "apply_settings":
                 settings.apply(msg.get("value") or {})
+                llm.set_backend(settings.get("conversation_llm_backend"))
                 console.log(f"⚙️ 설정 변경: {settings.current()}")
                 if web_pub is not None:
                     web_pub.emit("settings", json.dumps(settings.current()))
