@@ -227,6 +227,7 @@
     if (document.body.dataset.view === nv) return;
     setView(nv);   // URL 은 /{name} 유지 — /meeting 은 공개 뷰어
   }
+  function curView() { return document.body.dataset.view === "meeting" ? "meeting" : "home"; }
 
   // ---- TTS Audio + 채팅 버블 (홈) ----
   let audioCtx = null, playHead = 0, keepAlive = null;
@@ -452,6 +453,97 @@
     }
     return out;
   }
+  // ---- 마이크 캡처 객체: 단일 진입점 apply() + generation 가드 ----
+  function createMic(deps) {
+    let ws = null, node = null, stream = null, wakeLock = null;
+    let gen = 0, capturing = false;
+
+    function _teardownAudio() {
+      if (node) { try { node.disconnect(); } catch {} node.onaudioprocess = null; node = null; }
+      if (stream) { try { stream.getTracks().forEach((t) => t.stop()); } catch {} stream = null; }
+    }
+    function _teardownSocket(sendStop) {
+      if (ws) {
+        if (sendStop) { try { if (ws.readyState === 1) ws.send(JSON.stringify({ kind: "mic_stop" })); } catch {} }
+        try { ws.close(); } catch {}
+        ws = null;
+      }
+    }
+    function _releaseWakeLock() {
+      if (wakeLock) { try { wakeLock.release(); } catch {} wakeLock = null; }
+    }
+    async function _acquireWakeLock(myGen) {
+      try {
+        if ("wakeLock" in navigator) {
+          const wl = await navigator.wakeLock.request("screen");
+          if (myGen !== gen) { try { wl.release(); } catch {} return; }
+          wakeLock = wl;
+          wakeLock.addEventListener("release", () => { wakeLock = null; });
+        }
+      } catch {}
+    }
+
+    async function _start() {
+      const myGen = ++gen;
+      capturing = true;
+      const pw = deps.getPw();
+      if (!pw) { deps.onLost("auth"); return; }
+      _teardownSocket(false);
+      const proto = location.protocol === "https:" ? "wss:" : "ws:";
+      ws = new WebSocket(`${proto}//${deps.host}/mic/${encodeURIComponent(deps.name)}?token=${encodeURIComponent(pw)}`);
+      ws.binaryType = "arraybuffer";
+      let opened = false;
+      ws.onopen = () => { if (myGen !== gen) return; opened = true; ws.send(JSON.stringify({ kind: "mic_start" })); };
+      ws.onmessage = (e) => { if (myGen !== gen) return; try { if (JSON.parse(e.data).kind === "kicked") deps.onLost("kicked"); } catch {} };
+      ws.onclose = (e) => {
+        if (myGen !== gen) return;
+        if (e.code === 1008 || (!opened && e.code === 1006)) deps.onLost("auth");
+        else deps.onLost("closed");
+      };
+      let s;
+      try {
+        s = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+      } catch (err) {
+        if (myGen === gen) deps.onLost("mic-permission");
+        return;
+      }
+      if (myGen !== gen) { try { s.getTracks().forEach((t) => t.stop()); } catch {} return; }
+      stream = s;
+      deps.ensureAudio();
+      const ctx = deps.getAudioCtx();
+      const srcNode = ctx.createMediaStreamSource(stream);
+      node = ctx.createScriptProcessor(4096, 1, 1);
+      srcNode.connect(node); node.connect(ctx.destination);
+      await _acquireWakeLock(myGen);
+      node.onaudioprocess = (ev) => {
+        if (myGen !== gen) return;
+        if (!ws || ws.readyState !== 1) return;
+        ws.send(deps.floatToInt16(deps.downsample(ev.inputBuffer.getChannelData(0), ctx.sampleRate)).buffer);
+      };
+    }
+
+    function _stop() {
+      gen++;
+      capturing = false;
+      _teardownAudio();
+      _teardownSocket(true);
+      _releaseWakeLock();
+      const ctx = deps.getAudioCtx();
+      if (ctx && ctx.state === "suspended") ctx.resume();
+    }
+
+    function apply() {
+      const want = deps.shouldCapture();
+      if (want && !capturing) _start();
+      else if (!want && capturing) _stop();
+    }
+
+    document.addEventListener("visibilitychange", () => {
+      if (capturing && wakeLock === null && document.visibilityState === "visible") _acquireWakeLock(gen);
+    });
+
+    return { apply, isCapturing: () => capturing };
+  }
   async function requestWakeLock() {
     try { if ("wakeLock" in navigator) { wakeLock = await navigator.wakeLock.request("screen"); wakeLock.addEventListener("release", () => { wakeLock = null; }); } } catch {}
   }
@@ -599,6 +691,22 @@
   });
 
   // ---- 초기화 ----
+  function onMicLost(reason) {
+    if (curView() === "home") { voiceOn = false; $("voice-toggle").classList.remove("active"); }
+    else { micSource = "system"; $("mic-src-toggle").classList.remove("active"); }
+    mic.apply();
+    if (reason === "auth") { localStorage.removeItem(ADMIN_KEY); showLogin(); }
+    else if (reason === "mic-permission") alert("마이크 권한 실패 — 권한을 허용해주세요.");
+  }
+
+  const mic = createMic({
+    getPw, host: location.host, name,
+    ensureAudio, getAudioCtx: () => audioCtx,
+    floatToInt16, downsample,
+    shouldCapture: () => (curView() === "home" && voiceOn) || (curView() === "meeting" && micSource === "remote"),
+    onLost: onMicLost,
+  });
+
   setView("home");
   if (getPw()) { hideLogin(); connect(); } else { showLogin(); }
 })();
