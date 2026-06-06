@@ -365,6 +365,8 @@ class MeetingSession:
 
     async def _translate_bg(self, text: str, entry: dict | None = None):
         """룸의 나머지 모든 언어로 번역(단일 호출). 각 언어를 translation 이벤트로 emit."""
+        if len(self.meta.languages) <= 1:
+            return                       # 룸 언어 1개 — 번역 대상 없음(전사·요약만)
         extra = self.llm.extra if self._tx_client is self.llm.client else {}
         try:
             out = await coach.translate_multi(

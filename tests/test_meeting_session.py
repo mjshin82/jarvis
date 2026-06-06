@@ -183,3 +183,24 @@ def test_translate_bg_emits_per_language(monkeypatch):
     assert entry["translations"] == {"en": "hi", "ja": "ya"}
     assert ("translation", "hi", "en") in got
     assert ("translation", "ya", "ja") in got
+
+
+def test_translate_bg_skips_when_single_language(monkeypatch):
+    """룸 언어 1개면 번역 불필요 — translate_multi 호출/emit 없음."""
+    import coach
+    calls = []
+
+    async def fake_multi(client, model, text, system_prompt, extra=None):
+        calls.append(text)
+        return {"en": "hi"}
+
+    monkeypatch.setattr(coach, "translate_multi", fake_multi)
+    from live_translate import MeetingMeta
+    sess = _sess(meta=MeetingMeta(languages=["ko"]))
+    got = []
+    sess.add_listener(lambda kind, text, lang="": got.append((kind, text, lang)))
+    entry = {"ts": "t", "source": "안녕", "src_lang": "", "translations": {}}
+    asyncio.run(sess._translate_bg("안녕", entry))
+    assert calls == []          # 번역 호출 안 함
+    assert got == []            # translation 이벤트 없음
+    assert entry["translations"] == {}
