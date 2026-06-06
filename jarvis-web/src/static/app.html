@@ -437,8 +437,6 @@
     ws.addEventListener("error", () => { try { ws.close(); } catch {} });
   }
 
-  // ---- mic-take (셸 레벨 — 뷰 전환에도 유지) ----
-  let micWS = null, micNode = null, micStream = null, micOn = false, wakeLock = null;
   function downsample(input, inRate) {
     if (inRate === TARGET_SR) return input;
     const ratio = inRate / TARGET_SR, outLen = Math.floor(input.length / ratio);
@@ -544,52 +542,6 @@
     });
 
     return { apply, isCapturing: () => capturing };
-  }
-  async function requestWakeLock() {
-    try { if ("wakeLock" in navigator) { wakeLock = await navigator.wakeLock.request("screen"); wakeLock.addEventListener("release", () => { wakeLock = null; }); } } catch {}
-  }
-  document.addEventListener("visibilitychange", () => {
-    if (micOn && wakeLock === null && document.visibilityState === "visible") requestWakeLock();
-  });
-  function loseMic(msg) {
-    micStop(); micOn = false;
-    voiceOn = false; $("voice-toggle").classList.remove("active");   // 마이크 끊김 → 음성 버튼 비활성
-    if (msg) alert(msg);
-  }
-  async function micStart() {
-    const pw = getPw();
-    if (!pw) { showLogin(); return; }
-    const proto = location.protocol === "https:" ? "wss:" : "ws:";
-    micWS = new WebSocket(`${proto}//${location.host}/mic/${encodeURIComponent(name)}?token=${encodeURIComponent(pw)}`);
-    micWS.binaryType = "arraybuffer";
-    let micOpened = false;
-    micWS.onopen = () => { micOpened = true; micWS.send(JSON.stringify({ kind: "mic_start" })); };
-    micWS.onmessage = (e) => { try { if (JSON.parse(e.data).kind === "kicked") loseMic("다른 기기가 마이크를 가져갔습니다."); } catch {} };
-    micWS.onclose = (e) => {
-      // 열렸던 소켓의 1006 은 네트워크 끊김 → 인증 실패로 오인하지 않음(자격증명 유지)
-      if (e.code === 1008 || (!micOpened && e.code === 1006)) { localStorage.removeItem(ADMIN_KEY); showLogin(); loseMic("인증 실패 — 다시 로그인하세요."); }
-      else if (micOn) loseMic("마이크 연결이 종료되었습니다.");
-    };
-    micStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
-    ensureAudio();   // 재생과 같은 AudioContext 공유 — 마이크 정지가 재생을 안 끊게(iOS)
-    const srcNode = audioCtx.createMediaStreamSource(micStream);
-    micNode = audioCtx.createScriptProcessor(4096, 1, 1);
-    srcNode.connect(micNode); micNode.connect(audioCtx.destination);   // 출력은 무음(echo 없음)
-    await requestWakeLock();
-    micNode.onaudioprocess = (ev) => {
-      const inp = ev.inputBuffer.getChannelData(0);
-      if (!micWS || micWS.readyState !== 1) return;
-      micWS.send(floatToInt16(downsample(inp, audioCtx.sampleRate)).buffer);
-    };
-  }
-  function micStop() {
-    try { if (micWS && micWS.readyState === 1) micWS.send(JSON.stringify({ kind: "mic_stop" })); } catch {}
-    if (wakeLock) { try { wakeLock.release(); } catch {} wakeLock = null; }
-    if (micNode) { micNode.disconnect(); micNode.onaudioprocess = null; micNode = null; }
-    if (micStream) { micStream.getTracks().forEach((t) => t.stop()); micStream = null; }
-    // audioCtx 는 닫지 않음(재생 유지). iOS 가 마이크 정지로 일시중단했으면 재개.
-    if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
-    if (micWS) { try { micWS.close(); } catch {} micWS = null; }
   }
   // ---- 제어 채널(웹 → jarvis) one-shot 전송 ----
   function sendControl(obj) {
