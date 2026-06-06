@@ -10,8 +10,10 @@
   html, body { margin:0; padding:0; background:var(--bg); color:var(--fg); font-family:-apple-system,system-ui,sans-serif; }
   header { padding:14px 16px; border-bottom:1px solid var(--border); font-weight:600; }
   main { max-width:980px; margin:0 auto; width:100%; box-sizing:border-box; padding:16px; }
-  .row { display:block; width:100%; text-align:left; background:var(--card); border:1px solid var(--border);
-    border-radius:12px; padding:12px 14px; margin:10px 0; cursor:pointer; color:var(--fg); font:inherit; }
+  .row { display:flex; align-items:center; justify-content:space-between; gap:10px;
+    background:var(--card); border:1px solid var(--border); border-radius:12px; padding:12px 14px; margin:10px 0; }
+  .row-main { flex:1; min-width:0; cursor:pointer; }
+  .row-del { background:transparent; border:none; cursor:pointer; font-size:18px; padding:4px 8px; color:var(--muted); }
   .row .t { font-size:16px; font-weight:600; }
   .row .d { font-size:13px; color:var(--muted); margin-top:4px; }
   #msg { color:var(--muted); padding:8px 0; }
@@ -37,6 +39,7 @@
   const $ = (id) => document.getElementById(id);
   const room = decodeURIComponent(location.pathname.split("/").filter(Boolean)[0] || "jarvis");
   const KEY = "jarvis_admin_pw";
+  let ws = null;
   function fmt(s) { try { return new Date(s).toLocaleString(); } catch { return s || ""; } }
   function render(meetings) {
     const wrap = $("list");
@@ -44,21 +47,38 @@
     if (!meetings || !meetings.length) { $("msg").textContent = "저장된 회의 없음"; return; }
     $("msg").textContent = "";
     for (const m of meetings) {
-      const b = document.createElement("button");
-      b.className = "row";
-      b.innerHTML = `<div class="t"></div><div class="d"></div>`;
-      b.querySelector(".t").textContent = m.title || "회의";
-      b.querySelector(".d").textContent = fmt(m.started_at);
-      b.addEventListener("click", () => { location.href = `/${encodeURIComponent(room)}/meeting/${encodeURIComponent(m.id)}`; });
-      wrap.appendChild(b);
+      const row = document.createElement("div");
+      row.className = "row";
+      row.dataset.id = m.id;
+      const main = document.createElement("div");
+      main.className = "row-main";
+      main.innerHTML = `<div class="t"></div><div class="d"></div>`;
+      main.querySelector(".t").textContent = m.title || "회의";
+      main.querySelector(".d").textContent = fmt(m.started_at);
+      main.addEventListener("click", () => { location.href = `/${encodeURIComponent(room)}/meeting/${encodeURIComponent(m.id)}`; });
+      const del = document.createElement("button");
+      del.className = "row-del"; del.textContent = "🗑"; del.title = "삭제";
+      del.addEventListener("click", () => {
+        if (!confirm("이 회의를 삭제할까요?")) return;
+        if (ws && ws.readyState === 1) ws.send(JSON.stringify({ kind: "delete", id: m.id }));
+      });
+      row.appendChild(main); row.appendChild(del);
+      wrap.appendChild(row);
     }
   }
   function connect(pw) {
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(`${proto}//${location.host}/watch/${encodeURIComponent(room)}?token=${encodeURIComponent(pw)}`);
+    ws = new WebSocket(`${proto}//${location.host}/watch/${encodeURIComponent(room)}?token=${encodeURIComponent(pw)}`);
     ws.addEventListener("open", () => ws.send(JSON.stringify({ kind: "list" })));
     ws.addEventListener("message", (e) => {
-      try { const ev = JSON.parse(e.data); if (ev.kind === "meeting_list") render(JSON.parse(ev.text || "{}").meetings); } catch {}
+      try {
+        const ev = JSON.parse(e.data);
+        if (ev.kind === "meeting_list") { render(JSON.parse(ev.text || "{}").meetings); }
+        else if (ev.kind === "meeting_deleted") {
+          const d = JSON.parse(ev.text || "{}");
+          if (d.ok) { const r = $("list").querySelector(`.row[data-id="${CSS.escape(d.id)}"]`); if (r) r.remove(); }
+        }
+      } catch {}
     });
     ws.addEventListener("close", (e) => {
       if (e.code === 4003) {
