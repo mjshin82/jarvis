@@ -61,8 +61,8 @@ def test_config_endpointing_defaults():
     from gladia_stt import GladiaSTT
     g = GladiaSTT("k", on_partial=lambda t: None, on_final=lambda t: None)
     cfg = g._config()
-    assert cfg["endpointing"] == 0.8                       # 기본 0.05 보다 덜 민감
-    assert cfg["maximum_duration_without_endpointing"] == 15.0
+    assert cfg["endpointing"] == 0.25                      # 기본 0.05 보다 덜 민감
+    assert cfg["maximum_duration_without_endpointing"] == 5.0
 
 
 def test_config_endpointing_custom():
