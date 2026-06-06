@@ -32,6 +32,7 @@ class ConversationController:
                  log, set_status, speak, transcribe, translate_audio,
                  mode_intent, translate_mode, make_setup, make_meeting,
                  after_meeting_start, dispatch_command, fx,
+                 drain_queue=lambda: None,
                  follow_up=True, listen_timeout_s=8.0, clock=time.monotonic):
         self.mic = mic
         self.recognizer = recognizer
@@ -48,6 +49,7 @@ class ConversationController:
         self.make_meeting = make_meeting
         self.after_meeting_start = after_meeting_start
         self.dispatch_command = dispatch_command
+        self.drain_queue = drain_queue
         self.fx = fx
         self.follow_up = follow_up
         self.listen_timeout_s = listen_timeout_s
@@ -197,10 +199,7 @@ class ConversationController:
                 return
             if intent == "stop":
                 self._log_user(text)
-                if self.in_meeting():
-                    await self.stop_meeting()
-                else:
-                    await self.stop_translate()
+                await self.stop_meeting()
                 return
             await self.speak(text)
         else:
@@ -260,16 +259,18 @@ class ConversationController:
         """호출어 / '/mic' — 응답 중단 + 듣기 시작. TRANSLATE·MEETING 에선 무시."""
         if self.mode in (Mode.TRANSLATE, Mode.MEETING):
             return
+        self.drain_queue()
         self.player.flush()
         await self._to_listening(cue=True)
 
     async def request_stop(self):
-        """Esc — 진행 중 응답 취소 후 대기 복귀(대화 모드에 한함)."""
-        if self.mode is Mode.CONVERSING and self.response is not None \
-                and not self.response.done():
+        """Esc — 진행 중 응답이 있으면 취소 후 대기 복귀(상태 무관)."""
+        if self.response is not None and not self.response.done():
             self.player.flush()
             self.set_status(None)
             self.log("⏹  진행 중 응답을 멈췄어요.")
+            await self._cancel(self.response)
+            self.response = None
             await self._set_idle()
 
     # --- 텍스트 입력 ---
@@ -288,6 +289,8 @@ class ConversationController:
     # --- TRANSLATE ---
     async def start_translate(self, src_lang):
         await self._teardown()
+        self.player.flush()
+        self.drain_queue()
         self.translate_mode.start_translate(src_lang)
         self.mode = Mode.TRANSLATE
         self.phase = None
@@ -308,6 +311,8 @@ class ConversationController:
             self.log("회의 모드가 이미 진행 중입니다.")
             return
         await self._teardown()
+        self.player.flush()
+        self.drain_queue()
         setup = self.make_setup()
         self.mode = Mode.MEETING
         if not setup.done:

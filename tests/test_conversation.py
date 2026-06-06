@@ -315,3 +315,38 @@ def test_meeting_setup_two_phase_then_input():
         assert c.meeting_phase is MeetingPhase.LIVE
         assert sess.started is True
     asyncio.run(run())
+
+
+def test_request_stop_cancels_text_response_in_idle():
+    async def run():
+        c = make_controller()
+        # IDLE 에서 텍스트 응답이 도는 상황 모사
+        async def slow(): await asyncio.sleep(10)
+        c.response = asyncio.create_task(slow())
+        await c.request_stop()
+        assert c.response is None or c.response.cancelled() or c.response.done()
+        assert c.mode is Mode.IDLE
+    asyncio.run(run())
+
+
+def test_stop_intent_calls_stop_meeting(monkeypatch=None):
+    async def run():
+        c = make_controller()
+        c.spans["intent"] = "stop"
+        c.spans["stt"] = "회의 종료"
+        calls = []
+        async def fake_stop(): calls.append("stop_meeting")
+        c.stop_meeting = fake_stop
+        await c._dispatch_response_text("회의 종료", from_voice=True)
+        assert calls == ["stop_meeting"]
+    asyncio.run(run())
+
+
+def test_drain_queue_called_on_wake():
+    async def run():
+        drained = []
+        c = make_controller(drain_queue=lambda: drained.append(1))
+        await c.on_wake()
+        assert drained == [1]
+        await c._cancel(c.watchdog)
+    asyncio.run(run())
