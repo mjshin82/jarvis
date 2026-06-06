@@ -228,3 +228,37 @@ def test_translate_bg_filters_non_room_languages(monkeypatch):
     asyncio.run(sess._translate_bg("안녕", entry))
     assert entry["translations"] == {"en": "hi"}      # ja/zh 제외
     assert got == [("translation", "hi", "en")]
+
+
+def test_setup_translator_picks_bilingual_for_two_languages(monkeypatch):
+    import types as _types
+    import coach, wordbook, settings as _settings
+    from live_translate import MeetingMeta
+    monkeypatch.setattr(wordbook, "load_glossary_lines", lambda **kw: [])
+    monkeypatch.setattr(_settings, "get", lambda k, *a: "local")
+    calls = {}
+    monkeypatch.setattr(coach, "build_bilingual_system_prompt",
+                        lambda *a, **k: (calls.__setitem__("bi", True) or "BI"))
+    monkeypatch.setattr(coach, "build_multi_system_prompt",
+                        lambda *a, **k: (calls.__setitem__("multi", True) or "MULTI"))
+    sess = _sess(meta=MeetingMeta(languages=["ko", "en"]))
+    sess.llm = _types.SimpleNamespace(client=object(), model="m", extra={})
+    sess._setup_translator()
+    assert sess._tx_system == "BI" and calls.get("bi") and not calls.get("multi")
+
+
+def test_setup_translator_picks_multi_for_three_languages(monkeypatch):
+    import types as _types
+    import coach, wordbook, settings as _settings
+    from live_translate import MeetingMeta
+    monkeypatch.setattr(wordbook, "load_glossary_lines", lambda **kw: [])
+    monkeypatch.setattr(_settings, "get", lambda k, *a: "local")
+    calls = {}
+    monkeypatch.setattr(coach, "build_bilingual_system_prompt",
+                        lambda *a, **k: (calls.__setitem__("bi", True) or "BI"))
+    monkeypatch.setattr(coach, "build_multi_system_prompt",
+                        lambda *a, **k: (calls.__setitem__("multi", True) or "MULTI"))
+    sess = _sess(meta=MeetingMeta(languages=["ko", "en", "ja"]))
+    sess.llm = _types.SimpleNamespace(client=object(), model="m", extra={})
+    sess._setup_translator()
+    assert sess._tx_system == "MULTI" and calls.get("multi") and not calls.get("bi")
