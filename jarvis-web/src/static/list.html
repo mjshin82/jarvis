@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>회의 목록</title>
+<title data-i18n="list.title">회의 목록</title>
 <style>
   :root { --bg:#fff; --fg:#111418; --muted:#6b7280; --card:#f5f6f8; --border:#e5e7eb; --accent:#2563eb; }
   @media (prefers-color-scheme: dark) { :root { --bg:#0e1116; --fg:#e8eaed; --muted:#9aa0a6; --card:#161a21; --border:#2a2f37; --accent:#60a5fa; } }
@@ -22,18 +22,25 @@
   .gate-box { display:flex; flex-direction:column; gap:10px; width:min(86vw,300px); }
   #gate input { font-size:16px; padding:10px; border:1px solid #888; border-radius:8px; }
   #gate button { font-size:15px; padding:10px; border-radius:8px; cursor:pointer; }
+  .onair-row { border-color:#e11d48; }
+  .onair-badge { font-size:12px; font-weight:700; color:#e11d48; letter-spacing:.04em; margin-bottom:4px; }
 </style>
+<script src="/i18n.js"></script>
 </head>
 <body>
   <div id="gate" class="hidden">
     <div class="gate-box">
-      <div style="font-weight:600">🔒 관리자 로그인</div>
-      <input id="gate-pw" type="password" placeholder="관리자 비번" />
-      <button id="gate-go">입장</button>
+      <div style="font-weight:600" data-i18n="list.adminTitle">🔒 관리자 로그인</div>
+      <input id="gate-pw" type="password" placeholder="관리자 비번" data-i18n-ph="list.adminPwPlaceholder" />
+      <button id="gate-go" data-i18n="gate.enter">입장</button>
     </div>
   </div>
-  <header>최근 회의</header>
-  <main><div id="msg">불러오는 중…</div><div id="list"></div></main>
+  <header data-i18n="list.header">최근 회의</header>
+  <main>
+    <div id="onair"></div>
+    <div id="msg" data-i18n="list.loading">불러오는 중…</div>
+    <div id="list"></div>
+  </main>
 <script>
 (() => {
   const $ = (id) => document.getElementById(id);
@@ -44,7 +51,7 @@
   function render(meetings) {
     const wrap = $("list");
     wrap.innerHTML = "";
-    if (!meetings || !meetings.length) { $("msg").textContent = "저장된 회의 없음"; return; }
+    if (!meetings || !meetings.length) { $("msg").textContent = I18N.t("list.empty"); return; }
     $("msg").textContent = "";
     for (const m of meetings) {
       const row = document.createElement("div");
@@ -53,18 +60,34 @@
       const main = document.createElement("div");
       main.className = "row-main";
       main.innerHTML = `<div class="t"></div><div class="d"></div>`;
-      main.querySelector(".t").textContent = m.title || "회의";
+      main.querySelector(".t").textContent = m.title || I18N.t("list.defaultTitle");
       main.querySelector(".d").textContent = fmt(m.started_at);
       main.addEventListener("click", () => { location.href = `/${encodeURIComponent(room)}/meeting/${encodeURIComponent(m.id)}`; });
       const del = document.createElement("button");
-      del.className = "row-del"; del.textContent = "🗑"; del.title = "삭제";
+      del.className = "row-del"; del.textContent = "🗑"; del.title = I18N.t("list.deleteTitle");
       del.addEventListener("click", () => {
-        if (!confirm("이 회의를 삭제할까요?")) return;
+        if (!confirm(I18N.t("list.deleteConfirm"))) return;
         if (ws && ws.readyState === 1) ws.send(JSON.stringify({ kind: "delete", id: m.id }));
       });
       row.appendChild(main); row.appendChild(del);
       wrap.appendChild(row);
     }
+  }
+  function renderLive(info) {
+    const box = $("onair");
+    box.innerHTML = "";
+    if (!info || !info.live || !info.id) return;
+    const row = document.createElement("div");
+    row.className = "row onair-row";
+    row.style.cursor = "pointer";
+    const main = document.createElement("div");
+    main.className = "row-main";
+    main.innerHTML = `<div class="onair-badge"></div><div class="t"></div>`;
+    main.querySelector(".onair-badge").textContent = I18N.t("list.onAir");
+    main.querySelector(".t").textContent = info.title || I18N.t("list.liveDefault");
+    row.addEventListener("click", () => { location.href = `/${encodeURIComponent(room)}/meeting/${encodeURIComponent(info.id)}`; });
+    row.appendChild(main);
+    box.appendChild(row);
   }
   function connect(pw) {
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
@@ -74,6 +97,7 @@
       try {
         const ev = JSON.parse(e.data);
         if (ev.kind === "meeting_list") { render(JSON.parse(ev.text || "{}").meetings); }
+        else if (ev.kind === "meeting_live") { try { renderLive(JSON.parse(ev.text || "{}")); } catch {} }
         else if (ev.kind === "meeting_deleted") {
           const d = JSON.parse(ev.text || "{}");
           if (d.ok) { const r = $("list").querySelector(`.row[data-id="${CSS.escape(d.id)}"]`); if (r) r.remove(); }
@@ -83,7 +107,7 @@
     ws.addEventListener("close", (e) => {
       if (e.code === 4003) {
         localStorage.removeItem(KEY);
-        $("msg").textContent = "관리자 전용입니다.";
+        $("msg").textContent = I18N.t("list.adminOnly");
         $("gate").classList.remove("hidden");
       }
     });
@@ -93,7 +117,7 @@
     if (!pw) return;
     localStorage.setItem(KEY, pw);
     $("gate").classList.add("hidden");
-    $("msg").textContent = "불러오는 중…";
+    $("msg").textContent = I18N.t("list.loading");
     connect(pw);
   });
   $("gate-pw").addEventListener("keydown", (e) => { if (e.key === "Enter") $("gate-go").click(); });
