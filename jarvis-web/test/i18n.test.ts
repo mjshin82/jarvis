@@ -59,6 +59,18 @@ describe("I18N._t (카탈로그 조회 + 치환)", () => {
     expect(I18N._t("ja", "lang.ko")).toBe("🇰🇷 韓国語");
     expect(I18N._t("ko", "lang.en")).toBe("🇺🇸 English");
   });
+  it("list 네임스페이스 + nav 키를 로케일별로 반환", () => {
+    expect(I18N._t("ko", "list.header")).toBe("최근 회의");
+    expect(I18N._t("en", "list.header")).toBe("Recent meetings");
+    expect(I18N._t("ja", "list.header")).toBe("最近の会議");
+    expect(I18N._t("ko", "list.empty")).toBe("저장된 회의 없음");
+    expect(I18N._t("en", "list.deleteConfirm")).toBe("Delete this meeting?");
+    expect(I18N._t("ja", "list.liveDefault")).toBe("進行中の会議");
+    expect(I18N._t("en", "list.onAir")).toBe("🔴 ON AIR");
+    expect(I18N._t("ja", "list.onAir")).toBe("🔴 ON AIR");
+    expect(I18N._t("ko", "nav.toList")).toBe("회의 목록");
+    expect(I18N._t("en", "nav.toList")).toBe("Meeting list");
+  });
 });
 
 describe("I18N.apply (DOM 적용)", () => {
