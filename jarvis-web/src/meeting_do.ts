@@ -31,6 +31,7 @@ export class MeetingDO {
   private state: DurableObjectState;
   private publisher: WebSocket | null = null;
   private viewers: Map<WebSocket, "owner" | "public"> = new Map();
+  private adminWatchers: Set<WebSocket> = new Set();   // list.html admin 소켓 — meeting_live 푸시 대상
   private micSender: WebSocket | null = null;
   private micReceiver: WebSocket | null = null;
   private controlSender: WebSocket | null = null;
@@ -101,7 +102,7 @@ export class MeetingDO {
         try { parsed = JSON.parse(data as string) as ClientMessage; } catch { return; }
         this.handlePublisherMessage(parsed);
       },
-      onClose: () => this.broadcast(this.buildEvent({ kind: "publisher_disconnected" })),
+      onClose: () => { this.broadcast(this.buildEvent({ kind: "publisher_disconnected" })); this.broadcastLiveStatus(); },
     });
     this.notifyViewerCount();   // 재연결 publisher 에게 현재 owner 수 동기화
   }
@@ -125,6 +126,7 @@ export class MeetingDO {
       this.broadcast(this.buildEvent(msg));
       try { this.publisher?.close(1000, "end"); } catch { /* */ }
       this.publisher = null;
+      this.broadcastLiveStatus();
       return;
     }
     // partial: 조합중 임시 텍스트 — replay 버퍼에 넣지 않는다(재접속 시 미완성 partial 이
@@ -143,6 +145,7 @@ export class MeetingDO {
         this.currentPasswordHash = null;
         this.lastMeetingInfo = null;
         this.events = [];                // 회의 종료(홈 복귀) — replay 버퍼 비움
+        this.broadcastLiveStatus();
       }
       this.broadcast(this.buildEvent(msg));
       return;
@@ -150,6 +153,7 @@ export class MeetingDO {
     if (msg.kind === "meeting_title") {
       this.lastMeetingTitle = msg.text ?? null;
       this.broadcast(this.buildEvent(msg));
+      this.broadcastLiveStatus();
       return;
     }
     if (msg.kind === "meeting_creds") {
@@ -160,6 +164,7 @@ export class MeetingDO {
         this.currentMeetingId = c.meeting_id ?? null;
         this.currentPasswordHash = c.password_hash ?? null;
       } catch { /* */ }
+      this.broadcastLiveStatus();
       return;   // DO 전용 — broadcast/append 안 함
     }
     if (msg.kind === "meeting_info") {
@@ -238,6 +243,7 @@ export class MeetingDO {
         clearTimeout(timer);
         if (!isAdmin) { try { ws.close(4003, "admin-only"); } catch { /* */ } return; }
         if (!this.publisher) { try { ws.close(4003, "no-meeting"); } catch { /* */ } return; }
+        if (!this.adminWatchers.has(ws)) { this.adminWatchers.add(ws); this.sendLiveStatus(ws); }
         const req = ++this.archiveSeq;
         this.pendingArchive.set(req, ws);
         if (msg.kind === "list") {
@@ -279,7 +285,28 @@ export class MeetingDO {
         if (this.pendingArchive.delete(req)) { try { ws.close(4003, "archive-timeout"); } catch { /* */ } }
       }, 10000);
     });
-    ws.addEventListener("close", () => clearTimeout(timer));
+    ws.addEventListener("close", () => { clearTimeout(timer); this.adminWatchers.delete(ws); });
+  }
+
+  private isLive(): boolean {
+    return this.publisher != null && this.currentMeetingId != null;
+  }
+
+  private liveTitle(): string | null {
+    if (this.lastMeetingTitle) return this.lastMeetingTitle;
+    if (this.meta) return `${this.meta.partner} ↔ ${this.meta.user}`;
+    return null;
+  }
+
+  private sendLiveStatus(ws: WebSocket): void {
+    const text = this.isLive()
+      ? JSON.stringify({ live: true, id: this.currentMeetingId, title: this.liveTitle() })
+      : JSON.stringify({ live: false });
+    this.safeSend(ws, this.buildEvent({ kind: "meeting_live", text }));
+  }
+
+  private broadcastLiveStatus(): void {
+    for (const ws of this.adminWatchers) this.sendLiveStatus(ws);
   }
 
   // owner 뷰어 수를 publisher(jarvis)에게 통지 → TTS 웹/로컬 라우팅 결정에 사용
