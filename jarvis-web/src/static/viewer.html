@@ -187,6 +187,14 @@ if(__exports != exports)module.exports = exports;return module.exports}));
   const mid = decodeURIComponent(_parts[2] || "");
   const adminPw = localStorage.getItem("jarvis_admin_pw") || "";
   const $ = (id) => document.getElementById(id);
+  if (adminPw) {
+    const icon = document.querySelector(".app-icon");
+    if (icon) {
+      icon.style.cursor = "pointer";
+      icon.title = I18N.t("nav.toList");
+      icon.addEventListener("click", () => { location.href = `/${encodeURIComponent(key)}/meeting`; });
+    }
+  }
   let lastCard = null, draftCard = null, lockedToBottom = true;
   window.addEventListener("scroll", () => {
     const nearBottom = window.innerHeight + window.scrollY >= document.body.scrollHeight - 80;
