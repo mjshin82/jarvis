@@ -30,6 +30,7 @@ export type EventKind =
   | "delete_request"       // DO → jarvis: 삭제 요청. text=JSON{req,id}
   | "delete_response"      // jarvis → DO: 삭제 응답. text=JSON{req,ok,id}
   | "meeting_deleted"      // DO → viewer: 삭제 완료. text=JSON{id,ok}
+  | "meeting_live"         // DO → admin watcher(list.html): 진행중 회의 상태. text=JSON{live,id?,title?}
   | "user"
   | "assistant"
   | "navigate"
