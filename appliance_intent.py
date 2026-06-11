@@ -7,7 +7,7 @@
 import re
 
 _POWER = re.compile(r"(켜줘|켜|꺼줘|꺼|틀어줘|틀어|꺼주라|켜주라)\s*\.?\s*$")
-_TEMP = re.compile(r"(\d{1,2})\s*도")
+_TEMP = re.compile(r"(?<!\d)(\d{1,2})\s*도")
 
 
 def _find_appliance(text: str, aliases: dict) -> str | None:
@@ -22,6 +22,8 @@ def _find_appliance(text: str, aliases: dict) -> str | None:
 
 def classify(text: str, aliases: dict):
     """(appliance_key, command, value) 또는 None."""
+    if not aliases:
+        return None
     if not text:
         return None
     t = text.strip()
