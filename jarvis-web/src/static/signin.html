@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <title>Jarvis 로그인</title>
+  <link rel="icon" href="/icon.png" />
+  <style>
+    :root {
+      --bg: #ffffff; --fg: #111418; --muted: #6b7280; --border: #e5e7eb; --accent: #2563eb; --err: #dc2626;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #0e1116; --fg: #e8eaed; --muted: #9aa0a6; --border: #2a2f37; --accent: #60a5fa; --err: #f87171; }
+    }
+    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    #wrap { min-height: 100%; display: flex; flex-direction: column; gap: 16px;
+      align-items: center; justify-content: center; padding: 24px; box-sizing: border-box; }
+    .title { font-size: 20px; font-weight: 600; }
+    input { font-size: 16px; padding: 12px; width: 240px; max-width: 80vw; border-radius: 8px;
+      border: 1px solid #888; box-sizing: border-box; background: var(--bg); color: var(--fg); }
+    button { font-size: 18px; font-weight: 600; padding: 14px; width: 240px; max-width: 80vw;
+      border-radius: 10px; border: none; background: var(--accent); color: #fff; cursor: pointer; box-sizing: border-box; }
+    button:disabled { opacity: 0.55; cursor: progress; }
+    #err { color: var(--err); font-size: 14px; min-height: 18px; }
+  </style>
+</head>
+<body>
+  <div id="wrap">
+    <div class="title">🔒 Jarvis 로그인</div>
+    <input id="pw" type="password" placeholder="password" autocomplete="current-password" autofocus />
+    <button id="go">들어가기</button>
+    <div id="err"></div>
+  </div>
+  <script>
+    (() => {
+      const KEY = "jarvis_admin_pw";
+      // 경로에서 방 이름 추출: /<name>/signin
+      const m = location.pathname.match(/^\/([^/]+)\/signin\/?$/);
+      const name = m ? decodeURIComponent(m[1]) : "";
+      const appUrl = name ? "/" + encodeURIComponent(name) : "/";
+      const pwEl = document.getElementById("pw");
+      const goEl = document.getElementById("go");
+      const errEl = document.getElementById("err");
+
+      async function submit() {
+        const pw = pwEl.value.trim();
+        if (!pw) return;
+        errEl.textContent = "";
+        goEl.disabled = true;
+        try {
+          const r = await fetch("/verify/" + encodeURIComponent(name) + "?token=" + encodeURIComponent(pw));
+          if (r.ok) {
+            localStorage.setItem(KEY, pw);
+            location.href = appUrl;
+            return;
+          }
+          errEl.textContent = "비밀번호가 올바르지 않아요.";
+        } catch (e) {
+          errEl.textContent = "연결에 실패했어요. 잠시 후 다시 시도해 주세요.";
+        }
+        goEl.disabled = false;
+        pwEl.select();
+      }
+
+      goEl.addEventListener("click", submit);
+      pwEl.addEventListener("keydown", (e) => { if (e.key === "Enter") submit(); });
+    })();
+  </script>
+</body>
+</html>

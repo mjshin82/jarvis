@@ -18,6 +18,7 @@ import { MeetingDO } from "./meeting_do";
 import APP_HTML from "./static/app.html";
 import VIEWER_HTML from "./static/viewer.html";
 import LIST_HTML from "./static/list.html";
+import SIGNIN_HTML from "./static/signin.html";
 import ICON_PNG from "./static/icon.png";
 import I18N_JS from "./static/i18n.js";
 
@@ -89,6 +90,18 @@ app.get("/control-recv/:key", async (c) => {
 app.get("/watch/:key", async (c) => {
   if (c.req.header("Upgrade") !== "websocket") return c.text("expected websocket", 426);
   return forwardToDO(c.env, c.req.param("key"), "watch", c.req.raw, requireAdmin(c));
+});
+
+// 비번 검증(WS 아님). signin 페이지가 리다이렉트 전에 비번을 확인하는 용도.
+app.get("/verify/:key", (c) => {
+  if (!requireAdmin(c)) return c.text("unauthorized", 401);
+  return c.json({ ok: true });
+});
+
+app.get("/:name/signin", (c) => {
+  return new Response(SIGNIN_HTML, {
+    headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
+  });
 });
 
 app.get("/:name/meeting", (c) => {

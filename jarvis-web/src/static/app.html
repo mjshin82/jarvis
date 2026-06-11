@@ -126,11 +126,6 @@
   .lockbar.show { opacity: 1; pointer-events: auto; }
   @media (max-width: 600px) { .src { font-size: 17px; } .tx { font-size: 16px; } }
 
-  #login { position: fixed; inset: 0; background: var(--bg); display: flex; flex-direction: column;
-    gap: 16px; align-items: center; justify-content: center; z-index: 50; }
-  #login input { font-size: 16px; padding: 12px; width: 240px; border-radius: 8px; border: 1px solid #888; box-sizing: border-box; }
-  #login button { font-size: 18px; font-weight: 600; padding: 14px; width: 240px; border-radius: 10px;
-    border: none; background: var(--accent); color: #fff; cursor: pointer; box-sizing: border-box; }
   #meeting-loading { position: fixed; inset: 0; background: var(--bg); z-index: 60;
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; }
   #meeting-loading .spinner { width: 42px; height: 42px; border: 4px solid #8884;
@@ -160,7 +155,8 @@
   body.server-down #dock-plus,
   body.server-down #mic-src-toggle,
   body.server-down #meeting-stop,
-  body.server-down #plus-menu button { opacity: 0.45; pointer-events: none; cursor: not-allowed; animation: none; }
+  body.server-down #plus-menu button,
+  body.server-down #remote-sheet button { opacity: 0.45; pointer-events: none; cursor: not-allowed; animation: none; }
   #meeting-form .row label { font-size: 14px; margin-right: 12px; display: inline-block; }
   #meeting-form .row label input { margin-right: 4px; }
   .hidden { display: none !important; }
@@ -168,14 +164,44 @@
     color: var(--muted); display: flex; gap: 8px; align-items: center; word-break: break-all; }
   #meeting-share.hidden { display: none; }
   #meeting-share button { font-size: 12px; padding: 4px 8px; white-space: nowrap; }
+
+  /* 리모컨 시트 (바텀 시트) */
+  #remote-sheet { position: fixed; inset: 0; background: #0008; z-index: 27;
+    display: flex; align-items: flex-end; justify-content: center; }
+  #remote-sheet.hidden { display: none; }
+  #remote-sheet .rsheet { background: var(--bg); color: var(--fg); border: 1px solid var(--border);
+    border-radius: 16px 16px 0 0; padding: 14px 16px calc(18px + env(safe-area-inset-bottom));
+    width: min(100vw, 460px); box-sizing: border-box; }
+  #remote-sheet .sheet-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  #remote-sheet .sheet-head #rs-close { background: transparent; color: var(--fg); padding: 4px 8px; font-size: 16px; }
+  .rtabs { display: flex; gap: 8px; }
+  .rtab { background: var(--card); color: var(--fg); border-radius: 999px; padding: 6px 14px; font-size: 14px; }
+  .rtab.on { background: var(--accent); color: #fff; }
+  .rpanel.hidden { display: none; }
+  .rbtn { background: var(--card); color: var(--fg); border: 1px solid var(--border); border-radius: 12px;
+    padding: 14px 0; font-size: 15px; text-align: center; transition: transform .08s, background .15s, color .15s; }
+  .rbtn.flash { background: var(--accent); color: #fff; transform: scale(0.96); }
+  .rbtn.pow { background: #3b1d1d; color: #ff8b8b; border-color: #5d2a2a; }
+  .rrow3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .rockers { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+  .rocker { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 8px;
+    display: flex; flex-direction: column; gap: 8px; }
+  .rocker .rbtn { background: var(--bg); }
+  .rlbl { text-align: center; font-size: 12px; color: var(--muted); }
+  .therm { display: flex; align-items: center; justify-content: center; gap: 18px; margin: 6px 0 12px; }
+  .therm .pm { width: 56px; height: 56px; border-radius: 50%; padding: 0; font-size: 24px; }
+  .thermval { font-size: 46px; font-weight: 700; line-height: 1; }
+  .thermval .unit { font-size: 22px; color: var(--muted); }
+  .acpow { width: 100%; }
+  .acpow.on { background: #10331f; color: #7ee787; border-color: #1f5d36; }
+  .rlbl2 { font-size: 12px; color: var(--muted); margin: 14px 0 6px; }
+  .chips { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .chip { background: var(--card); color: var(--fg); border: 1px solid var(--border); border-radius: 999px;
+    padding: 9px 0; font-size: 14px; text-align: center; }
+  .chip.on { background: var(--accent); color: #fff; border-color: var(--accent); }
 </style>
 </head>
 <body data-view="home">
-  <div id="login">
-    <div>🔒 Jarvis 로그인</div>
-    <input id="login-pw" type="password" placeholder="password" />
-    <button id="login-go">들어가기</button>
-  </div>
   <div id="meeting-loading" class="hidden">
     <div class="spinner"></div>
     <div class="lbl">회의 준비 중…</div>
@@ -216,6 +242,7 @@
 
   <div id="plus-menu" class="hidden">
     <button id="menu-meet">🎤 미팅모드</button>
+    <button id="menu-remote">🎛️ 리모컨</button>
     <button id="menu-settings">⚙️ 설정</button>
   </div>
   <div id="settings-modal" class="hidden">
@@ -230,6 +257,58 @@
         <div class="sheet-label">LLM</div>
         <label><input type="radio" name="set-llm" value="deepseek"> 딥시크</label>
         <label><input type="radio" name="set-llm" value="local"> 로컬</label>
+      </div>
+    </div>
+  </div>
+  <div id="remote-sheet" class="hidden">
+    <div class="rsheet">
+      <div class="sheet-head">
+        <div class="rtabs">
+          <button class="rtab on" data-dev="tv">📺 TV</button>
+          <button class="rtab" data-dev="aircon">❄️ 에어컨</button>
+        </div>
+        <button id="rs-close">✕</button>
+      </div>
+      <div class="rpanel" data-dev="tv">
+        <div class="rrow3">
+          <button class="rbtn pow" data-ir="tv:power">⏻ 전원</button>
+          <button class="rbtn" data-ir="tv:mute">🔇 음소거</button>
+          <button class="rbtn" data-ir="tv:tv_av">⊞ 입력</button>
+        </div>
+        <div class="rockers">
+          <div class="rocker">
+            <button class="rbtn" data-ir="tv:volume_up">＋</button>
+            <div class="rlbl">볼륨</div>
+            <button class="rbtn" data-ir="tv:volume_down">－</button>
+          </div>
+          <div class="rocker">
+            <button class="rbtn" data-ir="tv:channel_up">＋</button>
+            <div class="rlbl">채널</div>
+            <button class="rbtn" data-ir="tv:channel_down">－</button>
+          </div>
+        </div>
+      </div>
+      <div class="rpanel hidden" data-dev="aircon">
+        <div class="therm">
+          <button class="rbtn pm" id="ac-temp-down">－</button>
+          <div class="thermval"><span id="ac-temp">24</span><span class="unit">°</span></div>
+          <button class="rbtn pm" id="ac-temp-up">＋</button>
+        </div>
+        <button class="rbtn acpow" id="ac-power">⏻ <span id="ac-power-lbl">켜기</span></button>
+        <div class="rlbl2">모드</div>
+        <div class="chips" id="ac-modes">
+          <button class="chip" data-mode="cool">냉방</button>
+          <button class="chip" data-mode="heat">난방</button>
+          <button class="chip" data-mode="dry">제습</button>
+          <button class="chip" data-mode="fan_only">송풍</button>
+        </div>
+        <div class="rlbl2">바람</div>
+        <div class="chips" id="ac-fans">
+          <button class="chip" data-fan="fan_auto">자동</button>
+          <button class="chip" data-fan="fan_low">약</button>
+          <button class="chip" data-fan="fan_medium">중</button>
+          <button class="chip" data-fan="fan_high">강</button>
+        </div>
       </div>
     </div>
   </div>
@@ -263,18 +342,9 @@
   const name = decodeURIComponent(location.pathname.replace(/^\//, "").replace(/\/.*$/, "")) || "jarvis";
   const $ = (id) => document.getElementById(id);
 
-  // ---- 로그인 ----
+  // ---- 로그인 ---- (별도 페이지 /<name>/signin 에서 처리. 토큰 없으면 그리로 보냄)
   function getPw() { return localStorage.getItem(ADMIN_KEY) || ""; }
-  function showLogin() { $("login").classList.remove("hidden"); }
-  function hideLogin() { $("login").classList.add("hidden"); }
-  $("login-go").addEventListener("click", () => {
-    ensureAudio();
-    const pw = $("login-pw").value.trim();
-    if (!pw) return;
-    localStorage.setItem(ADMIN_KEY, pw);
-    hideLogin();
-    connect();
-  });
+  function showLogin() { location.href = "/" + encodeURIComponent(name) + "/signin"; }
 
   // ---- 뷰 전환 (리로드 없음) ----
   let meetingTitle = "Meeting";   // applyMeta 가 갱신; 제목은 뷰에 따라 표시
@@ -738,6 +808,96 @@
   document.querySelectorAll('#settings-modal input[type="radio"]').forEach((r) =>
     r.addEventListener("change", () => sendControl({ kind: "apply_settings", value: curSettings() }))
   );
+
+  // ---- 리모컨 (IR 가전 제어) ----
+  function irSend(appliance, command, value) {
+    sendControl({ kind: "ir_command", appliance, command, ...(value != null ? { value } : {}) });
+  }
+  function flash(el) {
+    if (!el) return;
+    el.classList.add("flash");
+    setTimeout(() => el.classList.remove("flash"), 160);
+  }
+  // 에어컨 로컬 상태(낙관적 — IR 은 상태를 못 읽음). localStorage 영속.
+  const AC_KEY = "jarvis_ac_state";
+  function loadAc() {
+    try { return Object.assign({ temp: 24, power: false, mode: null, fan: null }, JSON.parse(localStorage.getItem(AC_KEY) || "{}")); }
+    catch { return { temp: 24, power: false, mode: null, fan: null }; }
+  }
+  let acState = loadAc();
+  function saveAc() { try { localStorage.setItem(AC_KEY, JSON.stringify(acState)); } catch {} }
+  function renderAc() {
+    $("ac-temp").textContent = acState.temp;
+    $("ac-power-lbl").textContent = acState.power ? "끄기" : "켜기";
+    $("ac-power").classList.toggle("on", acState.power);
+    document.querySelectorAll("#ac-modes .chip").forEach((c) => c.classList.toggle("on", c.dataset.mode === acState.mode));
+    document.querySelectorAll("#ac-fans .chip").forEach((c) => c.classList.toggle("on", c.dataset.fan === acState.fan));
+  }
+
+  function openRemote() {
+    if (!getPw()) { showLogin(); return; }
+    $("plus-menu").classList.add("hidden");
+    renderAc();
+    $("remote-sheet").classList.remove("hidden");
+  }
+  function closeRemote() { $("remote-sheet").classList.add("hidden"); }
+  $("menu-remote").addEventListener("click", openRemote);
+  $("rs-close").addEventListener("click", closeRemote);
+  $("remote-sheet").addEventListener("click", (e) => { if (e.target === $("remote-sheet")) closeRemote(); });
+
+  // 탭 전환 (TV / 에어컨)
+  document.querySelectorAll("#remote-sheet .rtab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      const dev = tab.dataset.dev;
+      document.querySelectorAll("#remote-sheet .rtab").forEach((t) => t.classList.toggle("on", t === tab));
+      document.querySelectorAll("#remote-sheet .rpanel").forEach((p) => p.classList.toggle("hidden", p.dataset.dev !== dev));
+    });
+  });
+
+  // 일반 IR 버튼 (data-ir="appliance:command") — TV 버튼
+  document.querySelectorAll("#remote-sheet [data-ir]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const [appliance, command] = btn.dataset.ir.split(":");
+      irSend(appliance, command);
+      flash(btn);
+    });
+  });
+
+  // 에어컨: 온도 ± (set_temp 절댓값 전송, 16~32 클램프)
+  function setTemp(delta) {
+    acState.temp = Math.max(16, Math.min(32, acState.temp + delta));
+    irSend("aircon", "set_temp", acState.temp);
+    saveAc(); renderAc();
+  }
+  $("ac-temp-up").addEventListener("click", () => { setTemp(1); flash($("ac-temp-up")); });
+  $("ac-temp-down").addEventListener("click", () => { setTemp(-1); flash($("ac-temp-down")); });
+
+  // 에어컨: 전원 토글
+  $("ac-power").addEventListener("click", () => {
+    acState.power = !acState.power;
+    irSend("aircon", acState.power ? "on" : "off");
+    if (!acState.power) acState.mode = null;   // 끄면 모드 표시 해제
+    saveAc(); renderAc(); flash($("ac-power"));
+  });
+
+  // 에어컨: 모드 칩 (cool/heat/dry/fan_only — payload 특성상 전원 ON)
+  document.querySelectorAll("#ac-modes .chip").forEach((chip) => {
+    chip.addEventListener("click", () => {
+      acState.mode = chip.dataset.mode;
+      acState.power = true;
+      irSend("aircon", chip.dataset.mode);
+      saveAc(); renderAc();
+    });
+  });
+
+  // 에어컨: 바람 칩
+  document.querySelectorAll("#ac-fans .chip").forEach((chip) => {
+    chip.addEventListener("click", () => {
+      acState.fan = chip.dataset.fan;
+      irSend("aircon", chip.dataset.fan);
+      saveAc(); renderAc();
+    });
+  });
   document.addEventListener("click", (e) => {
     const menu = $("plus-menu");
     if (!menu.classList.contains("hidden") && !menu.contains(e.target) && e.target !== $("dock-plus")) {
@@ -793,7 +953,7 @@
   });
 
   setView("home");
-  if (getPw()) { hideLogin(); connect(); } else { showLogin(); }
+  if (getPw()) { connect(); } else { showLogin(); }
 })();
 </script>
 </body>

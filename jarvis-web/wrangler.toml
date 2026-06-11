@@ -5,6 +5,11 @@ compatibility_date = "2024-12-01"
 # *.workers.dev 도메인 활성화 (커스텀 도메인 없을 때 외부 노출용)
 workers_dev = true
 
+# 로컬 dev 포트 고정 — 다른 wrangler 프로젝트(dict8/dict8-api 등 8787·8788)와
+# 충돌해 포트가 자동 증가(8789…)로 밀리지 않게. jarvis --local 의 RELAY_URL_LOCAL 과 일치.
+[dev]
+port = 8799
+
 # HTML 을 텍스트 모듈로 import (src/index.ts 의 `import MEETING_HTML from "./static/meeting.html"`)
 [[rules]]
 type = "Text"
