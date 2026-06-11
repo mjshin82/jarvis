@@ -16,6 +16,10 @@ import config
 
 _appliances: dict = {}   # 키 → {"aliases": [...], "commands": {name: {topic, payload}}}
 
+_client = None        # 살아있는 aiomqtt.Client (없으면 None)
+_ready = False        # 연결 준비 완료 여부
+_task = None          # 백그라운드 연결 유지 태스크
+
 
 def load_config(path: str = None) -> None:
     """iot.yaml 파싱 → _appliances. 순수·동기. 파일 없으면 빈 맵."""
@@ -77,3 +81,103 @@ def resolve_command(appliance: str, command: str, value=None):
     payload = str(spec.get("payload", ""))
     payload = payload.replace("{value}", "" if value is None else str(value))
     return topic, payload
+
+
+def available() -> bool:
+    return _ready and _client is not None
+
+
+async def send(appliance: str, command: str, value=None) -> str:
+    """가전 명령을 publish. 사용자용 결과 문자열 반환(play_music 과 동형)."""
+    if not available():
+        return "IoT가 비활성 상태예요(브로커 연결 안 됨)."
+    resolved = resolve_command(appliance, command, value)
+    if resolved is None:
+        return f"'{appliance} {command}' 명령을 모르겠어요."
+    topic, payload = resolved
+    try:
+        await _client.publish(topic, payload=payload)
+    except Exception as e:
+        print(f"[iot] publish 실패: {e}")
+        return "명령을 못 보냈어요."
+    key = resolve(appliance)
+    val = f" {value}" if value is not None else ""
+    return f"{key} {command}{val} 처리했어요."
+
+
+async def connect() -> None:
+    """브로커 연결을 백그라운드로 시작. 실패해도 예외 없이 로그만(jarvis 본체는 계속)."""
+    global _task
+    if not config.IOT_ENABLED:
+        print("[iot] 비활성(IOT_ENABLED=false)")
+        return
+    if not config.MQTT_HOST:
+        print("[iot] MQTT_HOST 미설정 → IoT 건너뜀")
+        return
+    import asyncio
+    _task = asyncio.create_task(_run())
+
+
+async def _run() -> None:
+    """연결 유지 루프 — 끊기면 재연결. aiomqtt Client 를 컨텍스트로 살려둔다."""
+    global _client, _ready
+    import asyncio
+    import aiomqtt
+    while True:
+        try:
+            async with aiomqtt.Client(
+                hostname=config.MQTT_HOST, port=config.MQTT_PORT,
+                username=config.MQTT_USER or None, password=config.MQTT_PASS or None,
+            ) as client:
+                _client, _ready = client, True
+                print(f"[iot] MQTT 연결됨: {config.MQTT_HOST}:{config.MQTT_PORT}")
+                async for _ in client.messages:
+                    pass
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            _ready, _client = False, None
+            print(f"[iot] MQTT 연결 실패/끊김, 5초 후 재시도: {e}")
+            try:
+                await asyncio.sleep(5)
+            except asyncio.CancelledError:
+                break
+    _ready, _client = False, None
+
+
+async def scan(seconds: float = 8.0) -> list[str]:
+    """짧게 구독해 관측된 토픽 목록을 모아 반환(실기기 토픽 파악용 디버그)."""
+    if not config.MQTT_HOST:
+        return []
+    import asyncio
+    import aiomqtt
+    topics: set[str] = set()
+    try:
+        async with aiomqtt.Client(
+            hostname=config.MQTT_HOST, port=config.MQTT_PORT,
+            username=config.MQTT_USER or None, password=config.MQTT_PASS or None,
+        ) as client:
+            await client.subscribe("#")
+
+            async def _collect():
+                async for m in client.messages:
+                    topics.add(str(m.topic))
+
+            try:
+                await asyncio.wait_for(_collect(), timeout=seconds)
+            except asyncio.TimeoutError:
+                pass
+    except Exception as e:
+        print(f"[iot] scan 실패: {e}")
+    return sorted(topics)
+
+
+async def close() -> None:
+    global _task, _ready, _client
+    if _task is not None:
+        _task.cancel()
+        try:
+            await _task
+        except Exception:
+            pass
+    _task, _ready, _client = None, False, None

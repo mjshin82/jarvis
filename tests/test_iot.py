@@ -75,3 +75,45 @@ def test_resolve_command_missing_topic_returns_none(tmp_path):
     """), encoding="utf-8")
     iot.load_config(str(p))
     assert iot.resolve_command("fan", "power", None) is None
+
+
+class _FakeClient:
+    def __init__(self):
+        self.published = []
+
+    async def publish(self, topic, payload=None):
+        self.published.append((topic, payload))
+
+
+@pytest.mark.asyncio
+async def test_send_publishes_resolved(loaded, monkeypatch):
+    fake = _FakeClient()
+    monkeypatch.setattr(iot, "_client", fake)
+    monkeypatch.setattr(iot, "_ready", True)
+
+    msg = await iot.send("에어컨", "set_temp", 26)
+
+    assert fake.published == [("ir/aircon/temperature", "26")]
+    assert "26" in msg or "에어컨" in msg   # 사용자용 결과 멘트
+
+
+@pytest.mark.asyncio
+async def test_send_unknown_command_no_publish(loaded, monkeypatch):
+    fake = _FakeClient()
+    monkeypatch.setattr(iot, "_client", fake)
+    monkeypatch.setattr(iot, "_ready", True)
+
+    msg = await iot.send("에어컨", "없는명령", None)
+
+    assert fake.published == []
+    assert "모르" in msg or "없" in msg     # 안내 멘트
+
+
+@pytest.mark.asyncio
+async def test_send_when_unavailable(loaded, monkeypatch):
+    monkeypatch.setattr(iot, "_client", None)
+    monkeypatch.setattr(iot, "_ready", False)
+
+    msg = await iot.send("에어컨", "power", None)
+
+    assert "비활성" in msg or "연결" in msg
