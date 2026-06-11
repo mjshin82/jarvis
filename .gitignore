@@ -32,3 +32,4 @@ jarvis-web/dist/
 setting.yaml
 .jarvis_state.json
 meetings.db
+iot.yaml

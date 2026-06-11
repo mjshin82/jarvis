@@ -163,3 +163,43 @@ async def _reload_settings(args: str, ctx: dict):
     web_pub = ctx.get("web_pub")
     if web_pub is not None:
         web_pub.emit("settings", json.dumps(settings.current()))
+
+
+@command("ir", help="IR 가전 제어 (스캔/목록/전송)",
+         usage="scan | list | <가전> <명령> [값]")
+async def _ir(args: str, ctx: dict):
+    import iot
+    parts = args.split()
+    if not parts:
+        ctx["log"]("사용법: /ir scan | /ir list | /ir <가전> <명령> [값]")
+        return
+    sub = parts[0].lower()
+
+    if sub == "scan":
+        ctx["log"]("🔎 MQTT 토픽 스캔 중(8초)…")
+        topics = await iot.scan(8.0)
+        if not topics:
+            ctx["log"]("관측된 토픽 없음 (MQTT_HOST/권한 확인).")
+            return
+        ctx["log"](f"관측된 토픽 {len(topics)}개:")
+        for t in topics:
+            ctx["log"](f"  {t}")
+        return
+
+    if sub == "list":
+        apps = iot.list_appliances()
+        if not apps:
+            ctx["log"]("등록된 가전 없음 (iot.yaml 확인).")
+            return
+        for a in apps:
+            ctx["log"](f"  {a}: {', '.join(iot.commands_for(a))}")
+        return
+
+    # /ir <가전> <명령> [값]
+    if len(parts) < 2:
+        ctx["log"]("사용법: /ir <가전> <명령> [값]")
+        return
+    appliance, command = parts[0], parts[1]
+    value = parts[2] if len(parts) > 2 else None
+    msg = await iot.send(appliance, command, value)
+    ctx["log"](f"📡 {msg}")
