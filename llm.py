@@ -188,9 +188,12 @@ class LLM:
         """LLM 우회: 명백한 IR 가전 명령을 곧장 실행. _fast_path(음악)와 동형."""
         appliance, command, value = intent
         self.history.append({"role": "user", "content": user_text})
-        yield config.IOT_FILLER
+        available = iot.available()
+        if available:
+            yield config.IOT_FILLER
         result = await iot.send(appliance, command, value)
-        self.history.append({"role": "assistant", "content": config.IOT_FILLER})
+        self.history.append({"role": "assistant",
+                             "content": config.IOT_FILLER if available else (result or "")})
         if result:
             yield result
 
@@ -328,7 +331,7 @@ class LLM:
                     yield s
                 return
 
-        # Fast-path: 명백한 가전 명령은 LLM 없이 곧장 실행 (음악 fast-path 다음에 확인 — 두 분류기는 서로소)
+        # Fast-path: 명백한 가전 명령은 LLM 없이 곧장 실행 (음악 fast-path 다음에 확인; _POWER 는 음악 재생 동사를 제외해 충돌 없음)
         if self.use_tools and config.IOT_ENABLED:
             app_intent = appliance_intent.classify(user_text, _iot_aliases())
             if app_intent:

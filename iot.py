@@ -11,7 +11,10 @@ eMotion Pro 의 실제 토픽/페이로드 포맷은 공개 문서에 없다. `/
 import asyncio
 import os
 
-import aiomqtt
+try:
+    import aiomqtt
+except Exception:
+    aiomqtt = None
 import yaml
 
 import config
@@ -144,6 +147,9 @@ async def connect() -> None:
     if not config.MQTT_HOST:
         print("[iot] MQTT_HOST 미설정 → IoT 건너뜀")
         return
+    if aiomqtt is None:
+        print("[iot] aiomqtt 미설치 → IoT 건너뜀")
+        return
     if _task is not None and not _task.done():
         return   # 이미 실행 중 — 중복 태스크 방지
     _stop = asyncio.Event()
@@ -153,7 +159,7 @@ async def connect() -> None:
 
 async def scan(seconds: float = 8.0) -> list[str]:
     """짧게 구독해 관측된 토픽 목록을 모아 반환(실기기 토픽 파악용 디버그)."""
-    if not config.MQTT_HOST:
+    if aiomqtt is None or not config.MQTT_HOST:
         return []
     topics: set[str] = set()
     try:

@@ -6,7 +6,7 @@
 """
 import re
 
-_POWER = re.compile(r"(켜줘|켜|꺼줘|꺼|틀어줘|틀어|꺼주라|켜주라)\s*\.?\s*$")
+_POWER = re.compile(r"(켜줘|켜|꺼줘|꺼|꺼주라|켜주라)\s*\.?\s*$")
 _TEMP = re.compile(r"(?<!\d)(\d{1,2})\s*도")
 
 
