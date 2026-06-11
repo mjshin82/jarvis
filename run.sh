@@ -3,6 +3,7 @@
 #
 # 사용: ./run.sh                # 자비스 본체 실행 (venv 활성 + Ollama 확인 후 python main.py)
 #       ./run.sh meeting-web    # meeting-web 로컬 dev 서버 (wrangler dev)
+#       ./run.sh --local        # 로컬 jarvis-web 에 연결 (.env 의 RELAY_*_LOCAL 로 RELAY_URL/TOKEN 덮어씀)
 #       ./run.sh --no-ollama    # Ollama 자동 기동/대기 건너뜀
 #       ./run.sh --help
 #
@@ -29,13 +30,15 @@ fail() { printf "%s  ✗ %s%s\n"  "$RED"     "$*" "$OFF"; }
 # --- 옵션 ---
 TARGET="jarvis"
 SKIP_OLLAMA=0
+USE_LOCAL=0
 for arg in "$@"; do
   case "$arg" in
     meeting-web|web) TARGET="meeting-web" ;;
     jarvis)          TARGET="jarvis" ;;
+    --local)         USE_LOCAL=1 ;;
     --no-ollama)     SKIP_OLLAMA=1 ;;
     -h|--help)
-      sed -n '2,9p' "$0"; exit 0 ;;
+      sed -n '2,10p' "$0"; exit 0 ;;
     *) echo "❗ 알 수 없는 옵션: $arg"; exit 2 ;;
   esac
 done
@@ -84,6 +87,18 @@ if [[ ! -f .env ]]; then
   fi
 else
   ok ".env"
+fi
+
+# --- 로컬 jarvis-web 연결 (--local) ---
+# config.py 의 load_dotenv 는 override=False 이므로, 여기서 export 한 값이 .env 보다 우선한다.
+# 그래서 RELAY_URL/RELAY_TOKEN 을 .env 의 *_LOCAL 값으로 덮어쓰면 로컬 wrangler dev 에 붙는다.
+read_env() { grep -E "^$1=" .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\r' | xargs || true; }
+if (( USE_LOCAL )); then
+  RU="$(read_env RELAY_URL_LOCAL)";   RU="${RU:-ws://localhost:8799}"
+  RT="$(read_env RELAY_TOKEN_LOCAL)"; RT="${RT:-devtoken}"
+  export RELAY_URL="$RU"
+  export RELAY_TOKEN="$RT"
+  ok "로컬 jarvis-web 연결: RELAY_URL=$RELAY_URL (RELAY_TOKEN=${RELAY_TOKEN:0:3}…)"
 fi
 
 # .env 에서 LLM_BACKEND 만 가볍게 파싱 (다른 값은 python 이 알아서 로드)
