@@ -8,6 +8,10 @@ music.py 패턴을 따라 모듈 레벨 함수로 노출한다(llm.py 가 직접
 eMotion Pro 의 실제 토픽/페이로드 포맷은 공개 문서에 없다. `/ir scan` 으로 실기기에서
 관측한 토픽을 iot.yaml 에 채워 넣는다.
 """
+import os
+
+import yaml
+
 import config
 
 _appliances: dict = {}   # 키 → {"aliases": [...], "commands": {name: {topic, payload}}}
@@ -16,8 +20,6 @@ _appliances: dict = {}   # 키 → {"aliases": [...], "commands": {name: {topic,
 def load_config(path: str = None) -> None:
     """iot.yaml 파싱 → _appliances. 순수·동기. 파일 없으면 빈 맵."""
     global _appliances
-    import os
-    import yaml
     p = path or config.IOT_CONFIG_PATH
     _appliances = {}
     if not os.path.exists(p):
@@ -25,17 +27,20 @@ def load_config(path: str = None) -> None:
     try:
         with open(p, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
-        _appliances = data.get("appliances", {}) or {}
+            result = data.get("appliances", {}) or {}
+        _appliances = result
     except Exception as e:
         print(f"[iot] iot.yaml 로드 실패: {e}")
         _appliances = {}
 
 
 def list_appliances() -> list[str]:
+    """등록된 가전 키 목록."""
     return list(_appliances.keys())
 
 
 def commands_for(appliance: str) -> list[str]:
+    """가전의 명령 이름 목록(미등록이면 빈 리스트)."""
     spec = _appliances.get(appliance)
     if not spec:
         return []
@@ -66,7 +71,9 @@ def resolve_command(appliance: str, command: str, value=None):
     spec = cmds.get(command)
     if not spec:
         return None
-    topic = spec["topic"]
+    topic = spec.get("topic")
+    if not topic:
+        return None
     payload = str(spec.get("payload", ""))
     payload = payload.replace("{value}", "" if value is None else str(value))
     return topic, payload

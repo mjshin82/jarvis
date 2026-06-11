@@ -62,3 +62,16 @@ def test_resolve_command_unknown_returns_none(loaded):
 def test_missing_file_is_empty(tmp_path):
     iot.load_config(str(tmp_path / "nope.yaml"))
     assert iot.list_appliances() == []
+
+
+def test_resolve_command_missing_topic_returns_none(tmp_path):
+    import textwrap
+    p = tmp_path / "iot.yaml"
+    p.write_text(textwrap.dedent("""
+        appliances:
+          fan:
+            commands:
+              power: { payload: "ON" }
+    """), encoding="utf-8")
+    iot.load_config(str(p))
+    assert iot.resolve_command("fan", "power", None) is None
