@@ -6,7 +6,8 @@
 """
 import re
 
-_POWER = re.compile(r"(켜줘|켜|꺼줘|꺼|꺼주라|켜주라)\s*\.?\s*$")
+_ON = re.compile(r"(켜줘|켜|켜주라)\s*$")
+_OFF = re.compile(r"(꺼줘|꺼|꺼주라)\s*$")
 _TEMP = re.compile(r"(?<!\d)(\d{1,2})\s*도")
 
 
@@ -38,7 +39,9 @@ def classify(text: str, aliases: dict):
     m = _TEMP.search(t)
     if m:
         return (appliance, "set_temp", int(m.group(1)))
-    # 전원: "켜줘/꺼줘"
-    if _POWER.search(t):
-        return (appliance, "power", None)
+    # 전원: 켜줘=on / 꺼줘=off (가전마다 페이로드가 다르므로 구분 — TV는 둘 다 power 토글에 매핑)
+    if _OFF.search(t):
+        return (appliance, "off", None)
+    if _ON.search(t):
+        return (appliance, "on", None)
     return None

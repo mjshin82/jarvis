@@ -4,13 +4,14 @@ ALIASES = {"aircon": ["에어컨", "에어콘"], "tv": ["티비", "TV"]}
 
 
 def test_power_on():
-    assert ai.classify("에어컨 켜줘", ALIASES) == ("aircon", "power", None)
-    assert ai.classify("티비 켜줘", ALIASES) == ("tv", "power", None)
+    assert ai.classify("에어컨 켜줘", ALIASES) == ("aircon", "on", None)
+    assert ai.classify("티비 켜줘", ALIASES) == ("tv", "on", None)
 
 
-def test_power_off_maps_to_power():
-    # 단일 power 토글 명령만 있는 가전: 꺼줘도 power 로
-    assert ai.classify("에어컨 꺼줘", ALIASES) == ("aircon", "power", None)
+def test_power_off():
+    # 켜줘=on / 꺼줘=off (가전별 페이로드가 다름)
+    assert ai.classify("에어컨 꺼줘", ALIASES) == ("aircon", "off", None)
+    assert ai.classify("티비 꺼줘", ALIASES) == ("tv", "off", None)
 
 
 def test_set_temp():
@@ -42,6 +43,6 @@ def test_empty_aliases_returns_none():
 
 def test_trailing_punctuation_ignored():
     # STT 가 끝에 ?, ! 등을 붙여도 fast-path 가 동작해야 함
-    assert ai.classify("TV 꺼줘?", ALIASES) == ("tv", "power", None)
-    assert ai.classify("티비 켜줘!", ALIASES) == ("tv", "power", None)
+    assert ai.classify("TV 꺼줘?", ALIASES) == ("tv", "off", None)
+    assert ai.classify("티비 켜줘!", ALIASES) == ("tv", "on", None)
     assert ai.classify("에어컨 26도?", ALIASES) == ("aircon", "set_temp", 26)
