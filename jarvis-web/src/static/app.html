@@ -271,6 +271,7 @@
 
   <div id="plus-menu" class="hidden">
     <button id="menu-meet">🎤 미팅모드</button>
+    <button id="menu-meetings">🗂️ 미팅기록</button>
     <button id="menu-remote">🎛️ 리모컨</button>
     <button id="menu-install">📲 홈 화면에 추가</button>
     <button id="menu-settings">⚙️ 설정</button>
@@ -879,6 +880,12 @@
   });
   $("install-close").addEventListener("click", () => $("install-modal").classList.add("hidden"));
   $("install-modal").addEventListener("click", (e) => { if (e.target === $("install-modal")) $("install-modal").classList.add("hidden"); });
+
+  // ---- 미팅기록 (회의 목록 페이지로 이동) ----
+  $("menu-meetings").addEventListener("click", () => {
+    $("plus-menu").classList.add("hidden");
+    location.href = "/" + encodeURIComponent(name) + "/meeting";
+  });
 
   // ---- 리모컨 (IR 가전 제어) ----
   function irSend(appliance, command, value) {
