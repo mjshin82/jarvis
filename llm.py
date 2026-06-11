@@ -184,6 +184,16 @@ class LLM:
             if result:
                 yield result
 
+    async def _fast_path_iot(self, intent, user_text):
+        """LLM 우회: 명백한 IR 가전 명령을 곧장 실행. _fast_path(음악)와 동형."""
+        appliance, command, value = intent
+        self.history.append({"role": "user", "content": user_text})
+        yield config.IOT_FILLER
+        result = await iot.send(appliance, command, value)
+        self.history.append({"role": "assistant", "content": config.IOT_FILLER})
+        if result:
+            yield result
+
     async def _run_tool(self, name, args_json):
         try:
             args = json.loads(args_json) if args_json else {}
@@ -196,9 +206,8 @@ class LLM:
         if name == "stop_music":
             return await stop_music()
         if name == "control_appliance":
-            args2 = args  # 이미 파싱됨
             return await iot.send(
-                args2.get("appliance", ""), args2.get("command", ""), args2.get("value"))
+                args.get("appliance", ""), args.get("command", ""), args.get("value"))
         return "지원하지 않는 도구입니다."
 
     async def warmup(self):
@@ -319,17 +328,12 @@ class LLM:
                     yield s
                 return
 
-        # Fast-path: 명백한 가전 명령은 LLM 없이 곧장 실행
+        # Fast-path: 명백한 가전 명령은 LLM 없이 곧장 실행 (음악 fast-path 다음에 확인 — 두 분류기는 서로소)
         if self.use_tools and config.IOT_ENABLED:
             app_intent = appliance_intent.classify(user_text, _iot_aliases())
             if app_intent:
-                appliance, command, value = app_intent
-                self.history.append({"role": "user", "content": user_text})
-                yield config.IOT_FILLER
-                result = await iot.send(appliance, command, value)
-                self.history.append({"role": "assistant", "content": config.IOT_FILLER})
-                if result:
-                    yield result
+                async for s in self._fast_path_iot(app_intent, user_text):
+                    yield s
                 return
 
         self.history.append({"role": "user", "content": user_text})
@@ -379,6 +383,8 @@ class LLM:
             yield config.STOP_FILLER
         elif "web_search" in names:
             yield config.SEARCH_FILLER
+        elif "control_appliance" in names:
+            yield config.IOT_FILLER
         for tc in msg.tool_calls:
             result = await self._run_tool(tc.function.name, tc.function.arguments)
             self.history.append({"role": "tool", "tool_call_id": tc.id, "content": result})
