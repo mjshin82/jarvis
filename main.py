@@ -42,12 +42,14 @@ from live_translate import hash_password
 from tts import TTS
 from player import Player
 from wake import WakeWord
+import iot
 from simulation import MODE
 
 
 async def main():
     mic = Microphone()
     stt = STT()
+    iot.load_config()
     llm = LLM()
     tts = TTS()
     backend = make_backend()
@@ -56,6 +58,7 @@ async def main():
     wake = WakeWord()
 
     await llm.warmup()
+    await iot.connect()
     console.start()                                 # 콘솔 입력 활성화 (하단 프롬프트)
     player_task = asyncio.create_task(player.run())
     # 상시 웹 퍼블리셔 (대화/TTS/회의자막 공용). RELAY 설정 시 항상 연결.
@@ -154,6 +157,7 @@ async def main():
         "request_exit": exit_event.set,
         "mic_router": (mic.router if config.REMOTE_MIC_ENABLED else None),
         "web_pub": web_pub,
+        "iot": iot,
     }
 
     recognizer = None   # 일반 대화 스트리밍 STT (없으면 배치 STT 폴백)
@@ -530,6 +534,10 @@ async def main():
                 await recognizer.aclose()
             except Exception:
                 pass
+        try:
+            await iot.close()
+        except Exception:
+            pass
         try:
             await backend.close()
         except Exception:
