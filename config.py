@@ -76,7 +76,10 @@ BROWSER_APP = os.getenv("BROWSER_APP", "Google Chrome")   # macOS 앱 이름
 # 음성으로 TV/에어컨 IR 가전 제어. 브로커에 붙어 가전의 명령 토픽에 publish.
 IOT_ENABLED = os.getenv("IOT_ENABLED", "false").lower() in ("1", "true", "yes")
 MQTT_HOST = os.getenv("MQTT_HOST", "")
-MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
+try:
+    MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
+except ValueError:
+    MQTT_PORT = 1883
 MQTT_USER = os.getenv("MQTT_USER", "")
 MQTT_PASS = os.getenv("MQTT_PASS", "")
 IOT_FILLER = "네, 처리할게요."   # 가전 명령 전송 동안 먼저 읽어줄 멘트
