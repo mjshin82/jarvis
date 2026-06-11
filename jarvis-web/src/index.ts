@@ -104,6 +104,28 @@ app.get("/:name/signin", (c) => {
   });
 });
 
+// PWA 매니페스트(방 이름별). 홈 화면 추가 시 standalone + 해당 방으로 시작.
+app.get("/:name/manifest.webmanifest", (c) => {
+  const base = "/" + encodeURIComponent(c.req.param("name"));
+  const manifest = {
+    name: "Jarvis",
+    short_name: "Jarvis",
+    display: "standalone",
+    orientation: "portrait",
+    start_url: base,
+    scope: base,
+    background_color: "#0e1116",
+    theme_color: "#0e1116",
+    icons: [
+      { src: "/icon.png", sizes: "192x192", type: "image/png", purpose: "any" },
+      { src: "/icon.png", sizes: "512x512", type: "image/png", purpose: "any maskable" },
+    ],
+  };
+  return new Response(JSON.stringify(manifest), {
+    headers: { "content-type": "application/manifest+json; charset=utf-8", "cache-control": "public, max-age=300" },
+  });
+});
+
 app.get("/:name/meeting", (c) => {
   return new Response(LIST_HTML, {
     headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
