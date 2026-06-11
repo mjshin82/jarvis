@@ -29,6 +29,8 @@ def classify(text: str, aliases: dict):
     t = text.strip()
     if len(t) > 25:          # 길면 의도가 섞임 → LLM
         return None
+    # STT 가 끝에 붙이는 문장부호(?, !, …) 제거 — "꺼줘?" 도 매칭되게
+    t = t.rstrip(" \t.?!~…。！？,")
     appliance = _find_appliance(t, aliases)
     if appliance is None:
         return None

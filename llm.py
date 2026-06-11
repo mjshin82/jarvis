@@ -7,6 +7,7 @@
 검색: config.SEARCH_ENABLED 면 web_search 도구를 제공 → 모델이 필요시 호출하면
       실제 검색 결과를 다시 넣어 최종 답변을 생성한다(2단계).
 """
+import asyncio
 import json
 import re
 from datetime import datetime
@@ -77,8 +78,9 @@ _TOOL_CONTROL_APPLIANCE = {
             "type": "object",
             "properties": {
                 "appliance": {"type": "string", "description": "가전 이름(예: 에어컨, 티비)"},
-                "command": {"type": "string", "description": "명령(예: power, set_temp, mode, vol_up)"},
+                "command": {"type": "string", "description": "시스템 프롬프트에 나열된 가전별 명령 이름 중 하나를 정확히 그대로. 없으면 추측 금지."},
                 "value": {"type": "string", "description": "값(예: 온도 26, 모드 cool). 없으면 생략"},
+                "times": {"type": "integer", "description": "같은 명령을 반복할 횟수(예: '볼륨 3단계'=3). 생략 시 1."},
             },
             "required": ["appliance", "command"],
         },
@@ -124,9 +126,15 @@ class LLM:
                 base += "\n음악/영상 재생은 play_music, 중지는 stop_music 도구를 사용한다."
             if config.IOT_ENABLED:
                 self.tools.append(_TOOL_CONTROL_APPLIANCE)
-                apps = ", ".join(iot.list_appliances()) or "(없음)"
-                base += (f"\nTV/에어컨 등 IR 가전 제어는 control_appliance 도구를 쓴다. "
-                         f"등록된 가전: {apps}.")
+                cmd_lines = [f"- {a}: {', '.join(iot.commands_for(a))}"
+                             for a in iot.list_appliances()]
+                if cmd_lines:
+                    base += ("\nTV/에어컨 등 IR 가전 제어는 control_appliance 도구를 쓴다. "
+                             "command 는 아래 가전별 목록의 이름을 정확히 그대로 쓰고, 목록에 없는 "
+                             "동작이면 추측하지 말 것. 같은 명령을 여러 번(예: '볼륨 3단계 낮춰')이면 "
+                             "times 에 횟수를 준다.\n등록된 가전과 명령:\n" + "\n".join(cmd_lines))
+                else:
+                    base += "\nTV/에어컨 등 IR 가전 제어는 control_appliance 도구를 쓴다."
         self.use_tools = bool(self.tools)
         if self.use_tools:
             names = ", ".join(t["function"]["name"] for t in self.tools)
@@ -209,8 +217,23 @@ class LLM:
         if name == "stop_music":
             return await stop_music()
         if name == "control_appliance":
-            return await iot.send(
-                args.get("appliance", ""), args.get("command", ""), args.get("value"))
+            appliance = args.get("appliance", "")
+            command = args.get("command", "")
+            value = args.get("value")
+            try:
+                times = int(args.get("times") or 1)
+            except (TypeError, ValueError):
+                times = 1
+            times = max(1, min(times, 10))   # IR 폭주 방지 상한
+            result = await iot.send(appliance, command, value)
+            # 첫 전송이 실패(미등록/비활성)면 반복 의미 없음
+            failed = ("모르" in (result or "")) or ("비활성" in (result or ""))
+            if times > 1 and not failed:
+                for _ in range(times - 1):
+                    await asyncio.sleep(0.4)   # IR 사이 간격
+                    result = await iot.send(appliance, command, value)
+                return f"{appliance} {command} {times}번 보냈어요."
+            return result
         return "지원하지 않는 도구입니다."
 
     async def warmup(self):

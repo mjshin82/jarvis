@@ -38,3 +38,10 @@ def test_three_digit_number_deferred():
 
 def test_empty_aliases_returns_none():
     assert ai.classify("에어컨 켜줘", {}) is None
+
+
+def test_trailing_punctuation_ignored():
+    # STT 가 끝에 ?, ! 등을 붙여도 fast-path 가 동작해야 함
+    assert ai.classify("TV 꺼줘?", ALIASES) == ("tv", "power", None)
+    assert ai.classify("티비 켜줘!", ALIASES) == ("tv", "power", None)
+    assert ai.classify("에어컨 26도?", ALIASES) == ("aircon", "set_temp", 26)
