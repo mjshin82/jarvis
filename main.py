@@ -137,6 +137,11 @@ async def main():
                 console.log(f"⚙️ 설정 변경: {settings.current()}")
                 if web_pub is not None:
                     web_pub.emit("settings", json.dumps(settings.current()))
+            elif kind == "ir_command":
+                # 웹 리모컨 → IR 가전 제어. 가전·명령은 iot.yaml 로 해석(없으면 무시+로그).
+                result = await iot.send(
+                    msg.get("appliance", ""), msg.get("command", ""), msg.get("value"))
+                console.log(f"🎛️ 리모컨: {result}")
 
         control_rx = ControlReceiver(
             config.RELAY_URL, config.RELAY_TOKEN,
