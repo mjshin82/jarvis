@@ -1,0 +1,15 @@
+# IR 가전 → MQTT 명령 매핑. 복사해서 iot.yaml 로 쓰고 실제 토픽을 채운다.
+# 토픽 문자열은 `/ir scan` 으로 실기기에서 관측한 값으로 교체할 것.
+# payload 의 {value} 는 음성에서 추출한 값(예: 온도)으로 치환된다.
+appliances:
+  aircon:
+    aliases: ["에어컨", "에어콘"]
+    commands:
+      power:    { topic: "REPLACE/aircon/power",       payload: "ON" }
+      set_temp: { topic: "REPLACE/aircon/temperature", payload: "{value}" }
+      mode:     { topic: "REPLACE/aircon/mode",        payload: "{value}" }   # cool/heat/fan
+  tv:
+    aliases: ["티비", "TV", "텔레비전"]
+    commands:
+      power:  { topic: "REPLACE/tv/power",  payload: "TOGGLE" }
+      vol_up: { topic: "REPLACE/tv/volup",  payload: "PRESS" }
