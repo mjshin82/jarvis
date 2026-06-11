@@ -20,6 +20,8 @@ from search import web_search
 from music import play_music, stop_music
 from simulation import MODE
 import music_intent
+import iot
+import appliance_intent
 
 # 문장 끝으로 볼 부호 (한국어/영어).
 _SENTENCE_END = re.compile(r"[.!?。…？！]\s*$|[\n]")
@@ -65,6 +67,30 @@ _TOOL_STOP_MUSIC = {
     },
 }
 
+_TOOL_CONTROL_APPLIANCE = {
+    "type": "function",
+    "function": {
+        "name": "control_appliance",
+        "description": "TV·에어컨 같은 IR 가전을 제어한다. 사용자가 가전을 켜고/끄거나 "
+                       "에어컨 온도·모드를 바꿔달라고 할 때 사용.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "appliance": {"type": "string", "description": "가전 이름(예: 에어컨, 티비)"},
+                "command": {"type": "string", "description": "명령(예: power, set_temp, mode, vol_up)"},
+                "value": {"type": "string", "description": "값(예: 온도 26, 모드 cool). 없으면 생략"},
+            },
+            "required": ["appliance", "command"],
+        },
+    },
+}
+
+
+def _iot_aliases() -> dict:
+    """iot.yaml 의 가전→alias 맵(appliance_intent 입력용)."""
+    return {a: iot.commands_for_aliases(a) for a in iot.list_appliances()}
+
+
 def _split_sentences(text: str):
     if not text:
         return []
@@ -96,6 +122,11 @@ class LLM:
                 self.tools.append(_TOOL_PLAY_MUSIC)
                 self.tools.append(_TOOL_STOP_MUSIC)
                 base += "\n음악/영상 재생은 play_music, 중지는 stop_music 도구를 사용한다."
+            if config.IOT_ENABLED:
+                self.tools.append(_TOOL_CONTROL_APPLIANCE)
+                apps = ", ".join(iot.list_appliances()) or "(없음)"
+                base += (f"\nTV/에어컨 등 IR 가전 제어는 control_appliance 도구를 쓴다. "
+                         f"등록된 가전: {apps}.")
         self.use_tools = bool(self.tools)
         if self.use_tools:
             names = ", ".join(t["function"]["name"] for t in self.tools)
@@ -164,6 +195,10 @@ class LLM:
             return await play_music(args.get("query", ""))
         if name == "stop_music":
             return await stop_music()
+        if name == "control_appliance":
+            args2 = args  # 이미 파싱됨
+            return await iot.send(
+                args2.get("appliance", ""), args2.get("command", ""), args2.get("value"))
         return "지원하지 않는 도구입니다."
 
     async def warmup(self):
@@ -282,6 +317,19 @@ class LLM:
             if intent:
                 async for s in self._fast_path(intent, user_text):
                     yield s
+                return
+
+        # Fast-path: 명백한 가전 명령은 LLM 없이 곧장 실행
+        if self.use_tools and config.IOT_ENABLED:
+            app_intent = appliance_intent.classify(user_text, _iot_aliases())
+            if app_intent:
+                appliance, command, value = app_intent
+                self.history.append({"role": "user", "content": user_text})
+                yield config.IOT_FILLER
+                result = await iot.send(appliance, command, value)
+                self.history.append({"role": "assistant", "content": config.IOT_FILLER})
+                if result:
+                    yield result
                 return
 
         self.history.append({"role": "user", "content": user_text})

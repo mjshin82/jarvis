@@ -62,6 +62,12 @@ def commands_for(appliance: str) -> list[str]:
     return list((spec.get("commands") or {}).keys())
 
 
+def commands_for_aliases(appliance: str) -> list[str]:
+    """가전의 alias 목록(intent 분류기 입력용)."""
+    spec = _appliances.get(appliance) or {}
+    return list(spec.get("aliases") or [])
+
+
 def resolve(name: str) -> str | None:
     """alias(또는 키)를 정규 가전 키로. 대소문자/양옆 공백 무시. 못 찾으면 None."""
     if not name:
